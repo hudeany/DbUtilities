@@ -1,0 +1,66 @@
+package de.soderer.utilities.db.utilities;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+
+public abstract class AbstractHashMap<K, V> extends HashMap<K, V> {
+	private static final long serialVersionUID = 868647429993685054L;
+
+	public AbstractHashMap() {
+		super();
+	}
+
+	public AbstractHashMap(final int initialCapacity, final float loadFactor) {
+		super(initialCapacity, loadFactor);
+	}
+
+	public AbstractHashMap(final int initialCapacity) {
+		super(initialCapacity);
+	}
+
+	public AbstractHashMap(final Map<? extends K, ? extends V> map) {
+		super(map.size());
+		putAll(map);
+	}
+
+	@Override
+	public boolean containsKey(final Object key) {
+		return super.containsKey(convertKey(key));
+	}
+
+	@Override
+	public V get(final Object key) {
+		return super.get(convertKey(key));
+	}
+
+	@Override
+	public V put(final K key, final V value) {
+		return super.put(convertKey(key), value);
+	}
+
+	@Override
+	public void putAll(final Map<? extends K, ? extends V> map) {
+		for (final Entry<? extends K, ? extends V> entry : map.entrySet()) {
+			put(entry.getKey(), entry.getValue());
+		}
+	}
+
+	@Override
+	public V remove(final Object key) {
+		return super.remove(convertKey(key));
+	}
+
+	@Override
+	public V computeIfAbsent(final K key, final Function<? super K, ? extends V> mappingFunction) {
+		return super.computeIfAbsent(convertKey(key), mappingFunction);
+	}
+
+	@Override
+	public V computeIfPresent(final K key, final BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+		return super.computeIfPresent(convertKey(key), remappingFunction);
+	}
+
+	protected abstract K convertKey(Object key);
+}
