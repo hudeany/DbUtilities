@@ -73,19 +73,6 @@ public class SqlDdlMigrationGenerator {
 		int foreignKeysDropped      = 0;
 		int commentsChanged         = 0; // table / schema comments
 
-		/** Returns {@code true} when not a single change was recorded. */
-		boolean isEmpty() {
-			return schemasCreated == 0 && schemasDropped == 0
-					&& tablesCreated == 0 && tablesDropped == 0
-					&& columnsAdded == 0 && columnsDropped == 0
-					&& columnsTypeChanged == 0 && columnsNullChanged == 0
-					&& columnsDefaultChanged == 0 && columnsCommentChanged == 0
-					&& primaryKeysChanged == 0
-					&& uniqueKeysAdded == 0 && uniqueKeysDropped == 0
-					&& foreignKeysAdded == 0 && foreignKeysDropped == 0
-					&& commentsChanged == 0;
-		}
-
 		/** Formats the statistics as a multi-line SQL comment block. */
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");

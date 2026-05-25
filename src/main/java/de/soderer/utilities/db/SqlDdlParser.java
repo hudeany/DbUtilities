@@ -673,34 +673,15 @@ public class SqlDdlParser {
 		}
 
 		// --- DEFAULT value ---
-		// Matches: DEFAULT <value>
-		// where <value> is one of:
-		// 'string literal' (including escaped '' inside)
-		// (expression) e.g. (CURRENT_TIMESTAMP), (0)
-		// keyword/number e.g. TRUE, FALSE, NULL, 42, 3.14, CURRENT_TIMESTAMP
-		// Stops before the next keyword: NOT, NULL, AUTO_INCREMENT, COMMENT, UNIQUE,
-		// PRIMARY, CHECK, REFERENCES, ON, CONSTRAINT, GENERATED
+		// Parsed character-by-character to correctly handle:
+		//   'string literals'  (including escaped '' inside)
+		//   (expressions)      with arbitrary nesting depth, e.g. (NEXTVAL('seq'))
+		//   bare keywords/numbers e.g. TRUE, 42, CURRENT_TIMESTAMP
+		// Stops at the first whitespace-separated keyword that signals the end of the
+		// DEFAULT clause: NOT, NULL, AUTO_INCREMENT, AUTOINCREMENT, COMMENT, UNIQUE,
+		// PRIMARY, CHECK, REFERENCES, ON, CONSTRAINT, GENERATED.
 		String defaultValue = null;
-		final Pattern defaultPat = Pattern.compile("(?i)\\bDEFAULT\\s+(" + "'(?:[^']|'')*'" // 'string'
-				+ "|\\((?:[^)']|'(?:[^']|'')*')*\\)" // (expression)
-				+ "|(?:(?!NOT\\b|NULL\\b|AUTO_|AUTOINC|COMMENT\\b|UNIQUE\\b"
-				+ "|PRIMARY\\b|CHECK\\b|REFERENCES\\b|ON\\b" + "|CONSTRAINT\\b|GENERATED\\b)" + "[^\\s,])+)" // bare
-																												// word
-																												// /
-																												// number
-				+ ")");
-		final Matcher dm = defaultPat.matcher(restOrig);
-		if (dm.find()) {
-			defaultValue = dm.group(1).trim();
-			// Strip outer quotes from string literals so callers get the plain value
-			if (defaultValue.startsWith("'") && defaultValue.endsWith("'")) {
-				defaultValue = unescapeSqlString(defaultValue.substring(1, defaultValue.length() - 1));
-			}
-			// Strip outer parentheses from expression defaults
-			else if (defaultValue.startsWith("(") && defaultValue.endsWith(")")) {
-				defaultValue = defaultValue.substring(1, defaultValue.length() - 1).trim();
-			}
-		}
+		defaultValue = parseDefaultValue(restOrig);
 
 		// --- MySQL inline column comment: COMMENT 'text' ---
 		String columnComment = null;
@@ -1148,6 +1129,205 @@ public class SqlDdlParser {
 			}
 		}
 		return names;
+	}
+
+	/**
+	 * Extracts the DEFAULT value from a column-definition tail string (everything
+	 * after the type token) without using a regular expression, so that closing
+	 * parentheses belonging to later tokens (e.g. {@code PRIMARY KEY (id)},
+	 * {@code VARCHAR(n)} of the next column) never cause a
+	 * {@link java.util.regex.PatternSyntaxException} or a wrong match.
+	 *
+	 * <p>Parsing rules:
+	 * <ol>
+	 *   <li>Scan forward until the keyword {@code DEFAULT} is found (word-boundary,
+	 *       case-insensitive, outside string literals).</li>
+	 *   <li>Skip whitespace after {@code DEFAULT}.</li>
+	 *   <li>Collect the value token:
+	 *     <ul>
+	 *       <li>If the next character is {@code '}: read the full SQL string literal,
+	 *           honouring {@code ''} as an escaped quote.</li>
+	 *       <li>If the next character is {@code (}: read until the matching {@code )},
+	 *           counting nesting depth and honouring string literals inside.</li>
+	 *       <li>Otherwise: read non-whitespace, non-comma characters until a
+	 *           stop-keyword ({@code NOT}, {@code NULL}, {@code AUTO_INCREMENT},
+	 *           {@code AUTOINCREMENT}, {@code COMMENT}, {@code UNIQUE},
+	 *           {@code PRIMARY}, {@code CHECK}, {@code REFERENCES}, {@code ON},
+	 *           {@code CONSTRAINT}, {@code GENERATED}) or end-of-input is
+	 *           reached.</li>
+	 *     </ul>
+	 *   </li>
+	 *   <li>Strip surrounding quotes / parentheses from the collected value and
+	 *       unescape {@code ''} inside string literals.</li>
+	 * </ol>
+	 *
+	 * @param rest the part of the column definition that follows the type token
+	 *             (original casing, may be {@code null})
+	 * @return the plain DEFAULT value, or {@code null} if none was found
+	 */
+	private static String parseDefaultValue(final String rest) {
+		if (rest == null || rest.isEmpty()) {
+			return null;
+		}
+
+		final int len = rest.length();
+		int i = 0;
+
+		// ── 1. Find the DEFAULT keyword ──────────────────────────────────────────
+		while (i < len) {
+			// Skip string literals so we don't find "DEFAULT" inside a quoted value
+			if (rest.charAt(i) == '\'') {
+				i++;
+				while (i < len) {
+					if (rest.charAt(i) == '\'') {
+						i++;
+						if (i < len && rest.charAt(i) == '\'') {
+							i++; // escaped ''
+						} else {
+							break;
+						}
+					} else {
+						i++;
+					}
+				}
+				continue;
+			}
+
+			// Check for word boundary before "DEFAULT"
+			if (i + 7 <= len && rest.regionMatches(true, i, "DEFAULT", 0, 7)) {
+				final boolean wordBefore = i == 0 || !Character.isLetterOrDigit(rest.charAt(i - 1));
+				final boolean wordAfter  = i + 7 >= len || !Character.isLetterOrDigit(rest.charAt(i + 7));
+				if (wordBefore && wordAfter) {
+					i += 7; // skip "DEFAULT"
+					break;
+				}
+			}
+			i++;
+		}
+
+		if (i >= len) {
+			return null; // no DEFAULT found
+		}
+
+		// ── 2. Skip whitespace after DEFAULT ─────────────────────────────────────
+		while (i < len && Character.isWhitespace(rest.charAt(i))) {
+			i++;
+		}
+		if (i >= len) {
+			return null;
+		}
+
+		// ── 3. Collect the value token ────────────────────────────────────────────
+		final char first = rest.charAt(i);
+		final StringBuilder value = new StringBuilder();
+
+		if (first == '\'') {
+			// ── 3a. SQL string literal ────────────────────────────────────────────
+			value.append(first);
+			i++;
+			while (i < len) {
+				final char c = rest.charAt(i);
+				value.append(c);
+				i++;
+				if (c == '\'') {
+					if (i < len && rest.charAt(i) == '\'') {
+						value.append('\'');
+						i++; // escaped ''
+					} else {
+						break; // end of literal
+					}
+				}
+			}
+			// Strip surrounding quotes and unescape ''
+			final String raw = value.toString();
+			return unescapeSqlString(raw.substring(1, raw.length() - 1));
+
+		} else if (first == '(') {
+			// ── 3b. Parenthesised expression – count depth ────────────────────────
+			int depth = 0;
+			while (i < len) {
+				final char c = rest.charAt(i);
+				if (c == '\'') {
+					// string literal inside expression
+					value.append(c);
+					i++;
+					while (i < len) {
+						final char sc = rest.charAt(i);
+						value.append(sc);
+						i++;
+						if (sc == '\'') {
+							if (i < len && rest.charAt(i) == '\'') {
+								value.append('\'');
+								i++;
+							} else {
+								break;
+							}
+						}
+					}
+					continue;
+				}
+				if (c == '(') {
+					depth++;
+				} else if (c == ')') {
+					depth--;
+					if (depth == 0) {
+						value.append(c);
+						i++;
+						break;
+					}
+				}
+				value.append(c);
+				i++;
+			}
+			// Strip surrounding parentheses
+			final String raw = value.toString();
+			if (raw.startsWith("(") && raw.endsWith(")")) {
+				return raw.substring(1, raw.length() - 1).trim();
+			}
+			return raw.trim();
+
+		} else {
+			// ── 3c. Bare keyword / number ─────────────────────────────────────────
+			// Stop-keywords that signal the end of the DEFAULT clause
+			final String[] stopKeywords = {
+					"NOT", "NULL", "AUTO_INCREMENT", "AUTOINCREMENT",
+					"COMMENT", "UNIQUE", "PRIMARY", "CHECK",
+					"REFERENCES", "ON", "CONSTRAINT", "GENERATED"
+			};
+
+			while (i < len) {
+				final char c = rest.charAt(i);
+				if (Character.isWhitespace(c) || c == ',') {
+					// Check whether what follows is a stop-keyword
+					int j = i;
+					while (j < len && Character.isWhitespace(rest.charAt(j))) {
+						j++;
+					}
+					// Extract the next word
+					int k = j;
+					while (k < len && (Character.isLetterOrDigit(rest.charAt(k)) || rest.charAt(k) == '_')) {
+						k++;
+					}
+					final String nextWord = rest.substring(j, k).toUpperCase();
+					boolean isStop = false;
+					for (final String kw : stopKeywords) {
+						if (kw.equals(nextWord)) {
+							isStop = true;
+							break;
+						}
+					}
+					if (isStop || c == ',') {
+						break;
+					}
+					// Not a stop-keyword → include the whitespace and continue
+					value.append(c);
+				} else {
+					value.append(c);
+				}
+				i++;
+			}
+			return value.toString().trim();
+		}
 	}
 
 	private static String readAll(final InputStream in) throws IOException {

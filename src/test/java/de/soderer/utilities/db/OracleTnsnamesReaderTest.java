@@ -1,4 +1,4 @@
-package de.soderer.utilities;
+package de.soderer.utilities.db;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;

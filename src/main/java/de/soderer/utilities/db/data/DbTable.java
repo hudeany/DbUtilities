@@ -1,5 +1,6 @@
 package de.soderer.utilities.db.data;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,7 +12,7 @@ public class DbTable {
 	private String tableName;
 	private final Map<String, DbColumn> columns = new CaseInsensitiveLinkedMap<>();
 	private List<String> primaryKey;
-	private List<DbForeignKey> foreignKeys;
+	private final List<DbForeignKey> foreignKeys = new ArrayList<>();
 	private final Map<String, List<String>> uniqueKeys = new LinkedHashMap<>();
 	private String tableComment;
 
