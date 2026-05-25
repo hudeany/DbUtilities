@@ -17,6 +17,6 @@ public enum DbSimpleDataType {
 				return simpleDataType;
 			}
 		}
-		throw new RuntimeException("Unknown SimpleDataType: " + name);
+		throw new RuntimeException("Unknown DbSimpleDataType: " + name);
 	}
 }

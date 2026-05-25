@@ -169,16 +169,16 @@ public class DbConnectionDefinition {
 		}
 	}
 
-	public void importParameters(final DbConnectionDefinition otherDbDefinition) {
-		if (otherDbDefinition != null) {
-			dbVendor = otherDbDefinition.getDbVendor();
-			hostnameAndPort = otherDbDefinition.getHostnameAndPort();
-			dbName = otherDbDefinition.getDbName();
-			username = otherDbDefinition.getUsername();
-			password = otherDbDefinition.getPassword();
-			secureConnection = otherDbDefinition.isSecureConnection();
-			trustStoreFile = otherDbDefinition.getTrustStoreFile();
-			trustStorePassword = otherDbDefinition.getTrustStorePassword();
+	public void importParameters(final DbConnectionDefinition otherDbConnectionDefinition) {
+		if (otherDbConnectionDefinition != null) {
+			dbVendor = otherDbConnectionDefinition.getDbVendor();
+			hostnameAndPort = otherDbConnectionDefinition.getHostnameAndPort();
+			dbName = otherDbConnectionDefinition.getDbName();
+			username = otherDbConnectionDefinition.getUsername();
+			password = otherDbConnectionDefinition.getPassword();
+			secureConnection = otherDbConnectionDefinition.isSecureConnection();
+			trustStoreFile = otherDbConnectionDefinition.getTrustStoreFile();
+			trustStorePassword = otherDbConnectionDefinition.getTrustStorePassword();
 		} else {
 			dbVendor = null;
 			hostnameAndPort = null;
