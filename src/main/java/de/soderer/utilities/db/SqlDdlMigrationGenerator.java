@@ -616,10 +616,15 @@ public class SqlDdlMigrationGenerator {
 	}
 
 	private static String quote(final String name) {
+		final boolean needsQuoteForSyntax = !DbUtilities.SAFE_IDENTIFIER.matcher(name).matches();
+
 		if (name == null) {
 			return "\"\"";
+		} else if (needsQuoteForSyntax) {
+			return "\"" + name.replace("\"", "\"\"") + "\"";
+		} else {
+			return name;
 		}
-		return "\"" + name.replace("\"", "\"\"") + "\"";
 	}
 
 	private static String quoteList(final List<String> names) {

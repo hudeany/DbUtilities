@@ -129,7 +129,7 @@ class SqlDdlMergeGeneratorTest {
 			final String ddl = "CREATE SCHEMA shared;";
 			final String output = merge(ddl, ddl);
 			// Count occurrences — should appear exactly once
-			final int count = countOccurrences(output.toLowerCase(), "create schema \"shared\"");
+			final int count = countOccurrences(output.toLowerCase(), "create schema shared");
 			assertTrue(count == 1, "Schema should appear exactly once, found: " + count);
 		}
 
@@ -191,8 +191,8 @@ class SqlDdlMergeGeneratorTest {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.ta (id INTEGER NOT NULL);";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.tb (id INTEGER NOT NULL);";
 			final String output = merge(a, b);
-			final int countA = countOccurrences(output.toLowerCase(), "\"ta\"");
-			final int countB = countOccurrences(output.toLowerCase(), "\"tb\"");
+			final int countA = countOccurrences(output.toLowerCase(), "ta");
+			final int countB = countOccurrences(output.toLowerCase(), "tb");
 			assertTrue(countA >= 1 && countB >= 1, "Both tables should appear in output");
 		}
 
@@ -330,7 +330,7 @@ class SqlDdlMergeGeneratorTest {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, code INTEGER NOT NULL, CONSTRAINT pk_t PRIMARY KEY (id));";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, code INTEGER NOT NULL, CONSTRAINT pk_t PRIMARY KEY (code));";
 			final String output = merge(a, b);
-			assertContains(output, "\"code\"");
+			assertContains(output, "code integer");
 		}
 
 		@Test
@@ -571,7 +571,7 @@ class SqlDdlMergeGeneratorTest {
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, name VARCHAR(100));";
 			// B wins — VARCHAR(100), and column appears only once
 			final String output = merge(a, b);
-			final int countId = countOccurrences(output.toLowerCase(), "\"id\"");
+			final int countId = countOccurrences(output.toLowerCase(), "id integer");
 			assertTrue(countId == 1, "Column id should appear exactly once, found: " + countId);
 			assertContains(output, "VARCHAR(100)");
 			assertNotContains(output, "VARCHAR(50)");

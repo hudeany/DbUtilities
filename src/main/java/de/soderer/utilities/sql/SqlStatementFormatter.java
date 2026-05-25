@@ -183,6 +183,8 @@ public class SqlStatementFormatter {
 		final CaseInsensitiveSet reservedWords;
 		if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
 			reservedWords = DbUtilities.RESERVED_WORDS_MYSSQL_MARIADB;
+		} else if (dbVendor == DbVendor.PostgreSQL) {
+			reservedWords = DbUtilities.RESERVED_WORDS_POSTGRESQL;
 		} else {
 			reservedWords = DbUtilities.RESERVED_WORDS_ORACLE;
 		}
