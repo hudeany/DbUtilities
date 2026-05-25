@@ -1,9 +1,10 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.data;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import de.soderer.utilities.db.exception.DbStructureException;
 import de.soderer.utilities.db.utilities.CaseInsensitiveLinkedMap;
 
 public class DbTable {

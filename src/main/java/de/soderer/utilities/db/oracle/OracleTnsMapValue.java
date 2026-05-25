@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.oracle;
 
 import de.soderer.utilities.db.utilities.MultiValueCaseInsensitiveOrderedMap;
 

@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.oracle;
 
 public class OracleTnsStringValue implements OracleTnsValue {
 	private final String value;

@@ -8,10 +8,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import de.soderer.utilities.db.OracleTnsMapValue;
-import de.soderer.utilities.db.OracleTnsStringValue;
-import de.soderer.utilities.db.OracleTnsValue;
-import de.soderer.utilities.db.OracleTnsnamesReader;
+import de.soderer.utilities.db.oracle.OracleTnsMapValue;
+import de.soderer.utilities.db.oracle.OracleTnsStringValue;
+import de.soderer.utilities.db.oracle.OracleTnsValue;
+import de.soderer.utilities.db.oracle.OracleTnsnamesReader;
 import de.soderer.utilities.db.utilities.MultiValueCaseInsensitiveOrderedMap;
 
 @SuppressWarnings("static-method")

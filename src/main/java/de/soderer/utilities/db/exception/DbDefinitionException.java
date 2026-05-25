@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.exception;
 
 /**
  * The Class DbExportException.

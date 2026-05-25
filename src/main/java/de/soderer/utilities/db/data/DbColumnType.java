@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.data;
 
 public class DbColumnType {
 	private final String typeName;
@@ -47,35 +47,35 @@ public class DbColumnType {
 		return defaultValue;
 	}
 
-	public SimpleDataType getSimpleDataType() {
+	public DbSimpleDataType getSimpleDataType() {
 		if (typeName.toLowerCase().contains("time")) {
-			return SimpleDataType.DateTime;
+			return DbSimpleDataType.DateTime;
 		} else if (typeName.toLowerCase().contains("date")) {
-			return SimpleDataType.Date;
+			return DbSimpleDataType.Date;
 		} else if (typeName.toLowerCase().contains("clob") || typeName.toLowerCase().contains("text")) {
-			return SimpleDataType.Clob;
+			return DbSimpleDataType.Clob;
 		} else if (typeName.toLowerCase().startsWith("varchar") || typeName.toLowerCase().startsWith("char") || typeName.toLowerCase().startsWith("character")) {
-			return SimpleDataType.String;
+			return DbSimpleDataType.String;
 		} else if (typeName.toLowerCase().contains("blob") ||"bytea".equals( typeName.toLowerCase())) {
-			return SimpleDataType.Blob;
+			return DbSimpleDataType.Blob;
 		} else if (typeName.toLowerCase().contains("bigint")) {
-			return SimpleDataType.BigInteger;
+			return DbSimpleDataType.BigInteger;
 		} else if (typeName.toLowerCase().contains("int")) {
-			return SimpleDataType.Integer;
+			return DbSimpleDataType.Integer;
 		} else if (typeName.toLowerCase().contains("bool")) {
-			return SimpleDataType.Boolean;
+			return DbSimpleDataType.Boolean;
 		} else {
 			// e.g.: PostgreSQL "REAL"
-			return SimpleDataType.Float;
+			return DbSimpleDataType.Float;
 		}
 	}
 
 	@Override
 	public String toString() {
-		final SimpleDataType simpleDataType = getSimpleDataType();
+		final DbSimpleDataType simpleDataType = getSimpleDataType();
 		return typeName
-				+ (simpleDataType == SimpleDataType.String ? "(" + characterByteSize + ")" : "")
-				+ (simpleDataType == SimpleDataType.Float ? "(" + numericPrecision + ", " + numericScale + ")" : "")
+				+ (simpleDataType == DbSimpleDataType.String ? "(" + characterByteSize + ")" : "")
+				+ (simpleDataType == DbSimpleDataType.Float ? "(" + numericPrecision + ", " + numericScale + ")" : "")
 				+ (nullable ? " nullable": " not nullable")
 				+ (autoIncrement ? " autoIncrement": "")
 				+ (defaultValue != null ? " default(" + defaultValue + ")" : "");

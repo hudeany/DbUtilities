@@ -19,24 +19,27 @@ public class DatabaseIndex {
 		return tableName;
 	}
 
-	public void setTableName(final String tableName) {
+	public DatabaseIndex setTableName(final String tableName) {
 		this.tableName = tableName;
+		return this;
 	}
 
 	public String getIndexName() {
 		return indexName;
 	}
 
-	public void setIndexName(final String indexName) {
+	public DatabaseIndex setIndexName(final String indexName) {
 		this.indexName = indexName;
+		return this;
 	}
 
 	public List<String> getIndexedColumns() {
 		return indexedColumns;
 	}
 
-	public void setIndexedColumns(final List<String> indexedColumns) {
+	public DatabaseIndex setIndexedColumns(final List<String> indexedColumns) {
 		this.indexedColumns = indexedColumns;
+		return this;
 	}
 
 	@Override

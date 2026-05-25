@@ -1,13 +1,13 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.data;
 
 import java.io.File;
 
-import de.soderer.utilities.db.DbUtilities.DbVendor;
+import de.soderer.utilities.db.exception.DbDefinitionException;
 import de.soderer.utilities.db.utilities.Utilities;
 
-public class DbDefinition {
+public class DbConnectionDefinition {
 	/** The database vendor. */
-	protected DbUtilities.DbVendor dbVendor = null;
+	protected DbVendor dbVendor = null;
 
 	/** The hostname. */
 	protected String hostnameAndPort;
@@ -27,11 +27,11 @@ public class DbDefinition {
 
 	protected char[] trustStorePassword = null;
 
-	public DbDefinition() {
+	public DbConnectionDefinition() {
 		// do nothing
 	}
 
-	public DbDefinition(final DbVendor dbVendor, final String hostnameAndPort, final String dbName, final String username, final char[] password) {
+	public DbConnectionDefinition(final DbVendor dbVendor, final String hostnameAndPort, final String dbName, final String username, final char[] password) {
 		this.dbVendor = dbVendor;
 		this.hostnameAndPort = hostnameAndPort;
 		this.dbName = dbName;
@@ -39,7 +39,7 @@ public class DbDefinition {
 		this.password = password;
 	}
 
-	public DbDefinition(final DbVendor dbVendor, final String hostnameAndPort, final String dbName, final String username, final char[] password, final boolean secureConnection, final File trustStoreFile, final char[] trustStorePassword) {
+	public DbConnectionDefinition(final DbVendor dbVendor, final String hostnameAndPort, final String dbName, final String username, final char[] password, final boolean secureConnection, final File trustStoreFile, final char[] trustStorePassword) {
 		this.dbVendor = dbVendor;
 		this.hostnameAndPort = hostnameAndPort;
 		this.dbName = dbName;
@@ -50,11 +50,11 @@ public class DbDefinition {
 		this.trustStorePassword = trustStorePassword;
 	}
 
-	public DbUtilities.DbVendor getDbVendor() {
+	public DbVendor getDbVendor() {
 		return dbVendor;
 	}
 
-	public void setDbVendor(final DbUtilities.DbVendor dbVendor) {
+	public void setDbVendor(final DbVendor dbVendor) {
 		this.dbVendor = dbVendor;
 	}
 
@@ -169,7 +169,7 @@ public class DbDefinition {
 		}
 	}
 
-	public void importParameters(final DbDefinition otherDbDefinition) {
+	public void importParameters(final DbConnectionDefinition otherDbDefinition) {
 		if (otherDbDefinition != null) {
 			dbVendor = otherDbDefinition.getDbVendor();
 			hostnameAndPort = otherDbDefinition.getHostnameAndPort();

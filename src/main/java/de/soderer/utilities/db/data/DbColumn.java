@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.data;
 
 public class DbColumn {
 	private String columnName;

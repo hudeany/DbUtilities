@@ -1,7 +1,8 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.data;
 
 import java.util.LinkedHashMap;
 
+import de.soderer.utilities.db.exception.DbStructureException;
 import de.soderer.utilities.db.utilities.CaseInsensitiveLinkedMap;
 
 public class DbSchema {

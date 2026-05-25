@@ -1,0 +1,610 @@
+package de.soderer.utilities.db;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import de.soderer.utilities.db.data.DbColumn;
+import de.soderer.utilities.db.data.DbColumnType;
+import de.soderer.utilities.db.data.DbForeignKey;
+import de.soderer.utilities.db.data.DbSchema;
+import de.soderer.utilities.db.data.DbSimpleDataType;
+import de.soderer.utilities.db.data.DbStructure;
+import de.soderer.utilities.db.data.DbTable;
+import de.soderer.utilities.db.exception.DbStructureException;
+
+/**
+ * Generates a SQL migration script that transforms a <em>source</em> database
+ * structure into a <em>destination</em> database structure.
+ *
+ * <p>The following DDL changes are detected and emitted:
+ * <ul>
+ *   <li>New schemas => {@code CREATE SCHEMA}</li>
+ *   <li>Dropped schemas => {@code DROP SCHEMA} (with all contained tables)</li>
+ *   <li>New tables => {@code CREATE TABLE} (columns, PK, FKs, unique keys)</li>
+ *   <li>Dropped tables => {@code DROP TABLE}</li>
+ *   <li>New columns => {@code ALTER TABLE … ADD COLUMN}</li>
+ *   <li>Dropped columns => {@code ALTER TABLE … DROP COLUMN}</li>
+ *   <li>Changed column types => {@code ALTER TABLE … ALTER COLUMN … TYPE}</li>
+ *   <li>Changed nullability => {@code ALTER TABLE … ALTER COLUMN … SET/DROP NOT NULL}</li>
+ *   <li>Changed default values => {@code ALTER TABLE … ALTER COLUMN … SET/DROP DEFAULT}</li>
+ *   <li>Changed primary keys => {@code DROP CONSTRAINT} + {@code ADD PRIMARY KEY}</li>
+ *   <li>New unique keys => {@code ALTER TABLE … ADD CONSTRAINT … UNIQUE}</li>
+ *   <li>Dropped unique keys => {@code ALTER TABLE … DROP CONSTRAINT}</li>
+ *   <li>New foreign keys => {@code ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY}</li>
+ *   <li>Dropped foreign keys => {@code ALTER TABLE … DROP CONSTRAINT}</li>
+ *   <li>Changed comments => {@code COMMENT ON …}</li>
+ * </ul>
+ */
+public class SqlDdlMigrationGenerator {
+	/**
+	 * Reads {@code sourceSqlData} and {@code destinationSqlData}, computes the
+	 * structural diff, and writes the resulting migration script to
+	 * {@code diffSqlData}.
+	 */
+	public static void diff(final InputStream sourceSqlData, final InputStream destinationSqlData, final OutputStream diffSqlData) throws IOException, DbStructureException {
+		final DbStructure source = SqlDdlParser.parse(sourceSqlData);
+		final DbStructure destination = SqlDdlParser.parse(destinationSqlData);
+
+		final List<String> statements = diffStructures(source, destination);
+
+		try (final PrintWriter writer = new PrintWriter(new OutputStreamWriter(diffSqlData, StandardCharsets.UTF_8))) {
+			writer.println("-- Migration script");
+			writer.println("-- Generated  : " + java.time.LocalDateTime.now());
+			writer.println();
+			if (statements.isEmpty()) {
+				writer.println("-- No structural differences detected.");
+			} else {
+				for (final String stmt : statements) {
+					writer.println(stmt);
+					writer.println();
+				}
+			}
+		}
+	}
+
+	/**
+	 * Computes the list of SQL statements needed to migrate {@code source} into
+	 * {@code destination}.
+	 *
+	 * @param source      current database structure
+	 * @param destination desired database structure
+	 * @return ordered list of SQL statements (may be empty, never {@code null})
+	 */
+	private static List<String> diffStructures(final DbStructure source, final DbStructure destination) {
+		final List<String> statements = new ArrayList<>();
+
+		final Map<String, DbSchema> srcSchemas = source.getSchemas();
+		final Map<String, DbSchema> dstSchemas = destination.getSchemas();
+
+		// --- Dropped schemas (present in source, absent in destination) ---
+		for (final String schemaName : srcSchemas.keySet()) {
+			if (!dstSchemas.containsKey(schemaName)) {
+				// Drop every table first, then the schema itself
+				final DbSchema srcSchema = srcSchemas.get(schemaName);
+				for (final String tableName : srcSchema.getTables().keySet()) {
+					statements.add(dropTable(schemaName, tableName));
+				}
+				statements.add("DROP SCHEMA " + quote(schemaName) + ";");
+			}
+		}
+
+		// --- New schemas (absent in source, present in destination) ---
+		for (final Map.Entry<String, DbSchema> dstEntry : dstSchemas.entrySet()) {
+			final String schemaName = dstEntry.getKey();
+			if (!srcSchemas.containsKey(schemaName)) {
+				statements.add("CREATE SCHEMA " + quote(schemaName) + ";");
+				// Create all tables in the new schema
+				for (final Map.Entry<String, DbTable> tblEntry : dstEntry.getValue().getTables().entrySet()) {
+					statements.addAll(createTable(schemaName, tblEntry.getValue()));
+				}
+			}
+		}
+
+		// --- Schemas present in both => diff tables ---
+		for (final Map.Entry<String, DbSchema> srcEntry : srcSchemas.entrySet()) {
+			final String schemaName = srcEntry.getKey();
+			if (!dstSchemas.containsKey(schemaName)) {
+				continue; // already handled above
+			}
+			final DbSchema srcSchema = srcEntry.getValue();
+			final DbSchema dstSchema = dstSchemas.get(schemaName);
+
+			statements.addAll(diffSchema(schemaName, srcSchema, dstSchema));
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Schema-level diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffSchema(final String schemaName, final DbSchema source, final DbSchema destination) {
+		final List<String> statements = new ArrayList<>();
+
+		final Map<String, DbTable> srcTables = source.getTables();
+		final Map<String, DbTable> dstTables = destination.getTables();
+
+		// Dropped tables
+		for (final String tableName : srcTables.keySet()) {
+			if (!dstTables.containsKey(tableName)) {
+				statements.add(dropTable(schemaName, tableName));
+			}
+		}
+
+		// New tables
+		for (final Map.Entry<String, DbTable> dstEntry : dstTables.entrySet()) {
+			if (!srcTables.containsKey(dstEntry.getKey())) {
+				statements.addAll(createTable(schemaName, dstEntry.getValue()));
+			}
+		}
+
+		// Tables present in both => diff columns / constraints
+		for (final Map.Entry<String, DbTable> srcEntry : srcTables.entrySet()) {
+			final String tableName = srcEntry.getKey();
+			if (dstTables.containsKey(tableName)) {
+				statements.addAll(diffTable(schemaName, srcEntry.getValue(), dstTables.get(tableName)));
+			}
+		}
+
+		// Schema comment
+		if (!Objects.equals(source.getSchemaComment(), destination.getSchemaComment())
+				&& destination.getSchemaComment() != null) {
+			statements.add("COMMENT ON SCHEMA " + quote(schemaName)
+					+ " IS " + sqlString(destination.getSchemaComment()) + ";");
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Table-level diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffTable(final String schemaName, final DbTable source, final DbTable destination) {
+		final List<String> statements = new ArrayList<>();
+		final String qualifiedTable = qualifiedName(schemaName, destination.getTableName());
+
+		// ---- Columns ----
+		final Map<String, DbColumn> srcCols = source.getColumns();
+		final Map<String, DbColumn> dstCols = destination.getColumns();
+
+		// Dropped columns
+		for (final String colName : srcCols.keySet()) {
+			if (!dstCols.containsKey(colName)) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " DROP COLUMN " + quote(colName) + ";");
+			}
+		}
+
+		// New columns
+		for (final Map.Entry<String, DbColumn> dstEntry : dstCols.entrySet()) {
+			if (!srcCols.containsKey(dstEntry.getKey())) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ADD COLUMN " + columnDefinition(dstEntry.getValue()) + ";");
+			}
+		}
+
+		// Changed columns
+		for (final Map.Entry<String, DbColumn> srcEntry : srcCols.entrySet()) {
+			final String colName = srcEntry.getKey();
+			if (!dstCols.containsKey(colName)) {
+				continue;
+			}
+			statements.addAll(diffColumn(qualifiedTable, srcEntry.getValue(), dstCols.get(colName)));
+		}
+
+		// ---- Primary key ----
+		statements.addAll(diffPrimaryKey(qualifiedTable, source, destination));
+
+		// ---- Unique keys ----
+		statements.addAll(diffUniqueKeys(qualifiedTable, source.getUniqueKeys(), destination.getUniqueKeys()));
+
+		// ---- Foreign keys ----
+		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys()));
+
+		// ---- Table comment ----
+		if (!Objects.equals(source.getTableComment(), destination.getTableComment())
+				&& destination.getTableComment() != null) {
+			statements.add("COMMENT ON TABLE " + qualifiedTable
+					+ " IS " + sqlString(destination.getTableComment()) + ";");
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Column-level diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffColumn(final String qualifiedTable, final DbColumn source,
+			final DbColumn destination) {
+		final List<String> statements = new ArrayList<>();
+		final String colName = quote(destination.getColumnName());
+		final DbColumnType srcType = source.getColumnType();
+		final DbColumnType dstType = destination.getColumnType();
+
+		if (srcType == null || dstType == null) {
+			return statements;
+		}
+
+		// Type / size / precision changed?
+		if (!typeSignatureEquals(srcType, dstType)) {
+			statements.add("ALTER TABLE " + qualifiedTable
+					+ " ALTER COLUMN " + colName
+					+ " TYPE " + sqlTypeName(dstType) + ";");
+		}
+
+		// Nullability changed?
+		if (srcType.isNullable() != dstType.isNullable()) {
+			if (dstType.isNullable()) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ALTER COLUMN " + colName + " DROP NOT NULL;");
+			} else {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ALTER COLUMN " + colName + " SET NOT NULL;");
+			}
+		}
+
+		// Default value changed?
+		if (!Objects.equals(srcType.getDefaultValue(), dstType.getDefaultValue())) {
+			if (dstType.getDefaultValue() == null) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ALTER COLUMN " + colName + " DROP DEFAULT;");
+			} else {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ALTER COLUMN " + colName + " SET DEFAULT " + dstType.getDefaultValue() + ";");
+			}
+		}
+
+		// Column comment changed?
+		if (!Objects.equals(source.getColumnComment(), destination.getColumnComment())
+				&& destination.getColumnComment() != null) {
+			statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + colName
+					+ " IS " + sqlString(destination.getColumnComment()) + ";");
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Primary key diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffPrimaryKey(final String qualifiedTable, final DbTable source,
+			final DbTable destination) {
+		final List<String> statements = new ArrayList<>();
+
+		final List<String> srcPk = source.getPrimaryKey();
+		final List<String> dstPk = destination.getPrimaryKey();
+
+		if (Objects.equals(normalizeList(srcPk), normalizeList(dstPk))) {
+			return statements;
+		}
+
+		// Drop existing PK first (PostgreSQL requires the constraint name;
+		// we use a generated name matching the common convention)
+		if (srcPk != null && !srcPk.isEmpty()) {
+			final String pkConstraintName = "pk_" + unqualifiedName(qualifiedTable);
+			statements.add("ALTER TABLE " + qualifiedTable
+					+ " DROP CONSTRAINT IF EXISTS " + quote(pkConstraintName) + ";");
+			// Fallback: generic DROP PRIMARY KEY (for MySQL)
+			// statements.add("ALTER TABLE " + qualifiedTable + " DROP PRIMARY KEY;");
+		}
+
+		if (dstPk != null && !dstPk.isEmpty()) {
+			final String pkConstraintName = "pk_" + unqualifiedName(qualifiedTable);
+			statements.add("ALTER TABLE " + qualifiedTable
+					+ " ADD CONSTRAINT " + quote(pkConstraintName)
+					+ " PRIMARY KEY (" + quoteList(dstPk) + ");");
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Unique key diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffUniqueKeys(final String qualifiedTable,
+			final Map<String, List<String>> srcUniqueKeys,
+			final Map<String, List<String>> dstUniqueKeys) {
+
+		final List<String> statements = new ArrayList<>();
+		final Map<String, List<String>> src = srcUniqueKeys != null ? srcUniqueKeys : new LinkedHashMap<>();
+		final Map<String, List<String>> dst = dstUniqueKeys != null ? dstUniqueKeys : new LinkedHashMap<>();
+
+		// Dropped unique constraints
+		for (final Map.Entry<String, List<String>> srcEntry : src.entrySet()) {
+			final String name = srcEntry.getKey();
+			if (!dst.containsKey(name) || !normalizeList(srcEntry.getValue()).equals(normalizeList(dst.get(name)))) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " DROP CONSTRAINT IF EXISTS " + quote(name) + ";");
+			}
+		}
+
+		// New or changed unique constraints
+		for (final Map.Entry<String, List<String>> dstEntry : dst.entrySet()) {
+			final String name = dstEntry.getKey();
+			final boolean existsUnchanged = src.containsKey(name)
+					&& normalizeList(src.get(name)).equals(normalizeList(dstEntry.getValue()));
+			if (!existsUnchanged) {
+				statements.add("ALTER TABLE " + qualifiedTable
+						+ " ADD CONSTRAINT " + quote(name)
+						+ " UNIQUE (" + quoteList(dstEntry.getValue()) + ");");
+			}
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// Foreign key diff
+	// -------------------------------------------------------------------------
+
+	private static List<String> diffForeignKeys(final String qualifiedTable,
+			final List<DbForeignKey> srcForeignKeys, final List<DbForeignKey> dstForeignKeys) {
+
+		final List<String> statements = new ArrayList<>();
+		final List<DbForeignKey> src = srcForeignKeys != null ? srcForeignKeys : new ArrayList<>();
+		final List<DbForeignKey> dst = dstForeignKeys != null ? dstForeignKeys : new ArrayList<>();
+
+		// Dropped foreign keys (by name)
+		for (final DbForeignKey srcFk : src) {
+			final boolean stillPresent = dst.stream()
+					.anyMatch(dstFk -> foreignKeysEqual(srcFk, dstFk));
+			if (!stillPresent) {
+				final String fkName = srcFk.getForeignKeyName();
+				if (fkName != null) {
+					statements.add("ALTER TABLE " + qualifiedTable
+							+ " DROP CONSTRAINT IF EXISTS " + quote(fkName) + ";");
+				}
+			}
+		}
+
+		// New foreign keys
+		for (final DbForeignKey dstFk : dst) {
+			final boolean alreadyExists = src.stream()
+					.anyMatch(srcFk -> foreignKeysEqual(srcFk, dstFk));
+			if (!alreadyExists) {
+				statements.add(addForeignKeyStatement(qualifiedTable, dstFk));
+			}
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// CREATE TABLE statement builder
+	// -------------------------------------------------------------------------
+
+	private static List<String> createTable(final String schemaName, final DbTable table) {
+		final List<String> statements = new ArrayList<>();
+		final String qualifiedTable = qualifiedName(schemaName, table.getTableName());
+		final StringBuilder sb = new StringBuilder();
+
+		sb.append("CREATE TABLE ").append(qualifiedTable).append(" (");
+
+		final List<String> entries = new ArrayList<>();
+
+		// Columns
+		for (final DbColumn col : table.getColumns().values()) {
+			entries.add("\n    " + columnDefinition(col));
+		}
+
+		// Primary key
+		final List<String> pk = table.getPrimaryKey();
+		if (pk != null && !pk.isEmpty()) {
+			final String pkConstraintName = "pk_" + table.getTableName();
+			entries.add("\n    CONSTRAINT " + quote(pkConstraintName)
+					+ " PRIMARY KEY (" + quoteList(pk) + ")");
+		}
+
+		// Unique keys
+		if (table.getUniqueKeys() != null) {
+			for (final Map.Entry<String, List<String>> uq : table.getUniqueKeys().entrySet()) {
+				entries.add("\n    CONSTRAINT " + quote(uq.getKey())
+						+ " UNIQUE (" + quoteList(uq.getValue()) + ")");
+			}
+		}
+
+		// Foreign keys
+		if (table.getForeignKeys() != null) {
+			for (final DbForeignKey fk : table.getForeignKeys()) {
+				entries.add("\n    " + inlineForeignKey(fk));
+			}
+		}
+
+		sb.append(String.join(",", entries));
+		sb.append("\n);");
+
+		statements.add(sb.toString());
+
+		// Table comment
+		if (table.getTableComment() != null) {
+			statements.add("COMMENT ON TABLE " + qualifiedTable
+					+ " IS " + sqlString(table.getTableComment()) + ";");
+		}
+
+		// Column comments
+		for (final DbColumn col : table.getColumns().values()) {
+			if (col.getColumnComment() != null) {
+				statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + quote(col.getColumnName())
+						+ " IS " + sqlString(col.getColumnComment()) + ";");
+			}
+		}
+
+		return statements;
+	}
+
+	// -------------------------------------------------------------------------
+	// SQL snippet helpers
+	// -------------------------------------------------------------------------
+
+	private static String dropTable(final String schemaName, final String tableName) {
+		return "DROP TABLE IF EXISTS " + qualifiedName(schemaName, tableName) + ";";
+	}
+
+	private static String columnDefinition(final DbColumn col) {
+		final StringBuilder sb = new StringBuilder();
+		sb.append(quote(col.getColumnName())).append(' ');
+
+		final DbColumnType t = col.getColumnType();
+		if (t != null) {
+			sb.append(sqlTypeName(t));
+			if (t.isAutoIncrement()) {
+				// PostgreSQL: use GENERATED ALWAYS AS IDENTITY; omit for other dialects
+				sb.append(" GENERATED ALWAYS AS IDENTITY");
+			}
+			if (!t.isNullable()) {
+				sb.append(" NOT NULL");
+			}
+			if (t.getDefaultValue() != null) {
+				sb.append(" DEFAULT ").append(t.getDefaultValue());
+			}
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Renders the SQL type name with size / precision / scale where applicable,
+	 * based on the {@link DbColumnType#getSimpleDataType()} category.
+	 */
+	private static String sqlTypeName(final DbColumnType t) {
+		final DbSimpleDataType simple = t.getSimpleDataType();
+		final String base = t.getTypeName();
+
+		switch (simple) {
+			case String:
+				return base + "(" + t.getCharacterByteSize() + ")";
+			case Float:
+				if (t.getNumericPrecision() > 0) {
+					return base + "(" + t.getNumericPrecision() + ", " + t.getNumericScale() + ")";
+				}
+				return base;
+			case BigInteger:
+			case Blob:
+			case Boolean:
+			case Clob:
+			case Date:
+			case DateTime:
+			case Integer:
+			default:
+				return base;
+		}
+	}
+
+	private static String inlineForeignKey(final DbForeignKey fk) {
+		final StringBuilder sb = new StringBuilder();
+		if (fk.getForeignKeyName() != null) {
+			sb.append("CONSTRAINT ").append(quote(fk.getForeignKeyName())).append(' ');
+		}
+		sb.append("FOREIGN KEY (").append(quoteList(fk.getColumnNames())).append(')');
+		sb.append(" REFERENCES ").append(quote(fk.getReferencedTableName()));
+		if (fk.getReferencedColumnNames() != null && !fk.getReferencedColumnNames().isEmpty()) {
+			sb.append(" (").append(quoteList(fk.getReferencedColumnNames())).append(')');
+		}
+		return sb.toString();
+	}
+
+	private static String addForeignKeyStatement(final String qualifiedTable, final DbForeignKey fk) {
+		return "ALTER TABLE " + qualifiedTable + " ADD " + inlineForeignKey(fk) + ";";
+	}
+
+	// -------------------------------------------------------------------------
+	// Equality helpers
+	// -------------------------------------------------------------------------
+
+	private static boolean typeSignatureEquals(final DbColumnType a, final DbColumnType b) {
+		if (!a.getTypeName().equalsIgnoreCase(b.getTypeName())) {
+			return false;
+		}
+		final DbSimpleDataType simple = a.getSimpleDataType();
+		if (simple == DbSimpleDataType.String && a.getCharacterByteSize() != b.getCharacterByteSize()) {
+			return false;
+		}
+		if (simple == DbSimpleDataType.Float
+				&& (a.getNumericPrecision() != b.getNumericPrecision()
+						|| a.getNumericScale() != b.getNumericScale())) {
+			return false;
+		}
+		return true;
+	}
+
+	private static boolean foreignKeysEqual(final DbForeignKey a, final DbForeignKey b) {
+		return Objects.equals(a.getForeignKeyName(), b.getForeignKeyName())
+				&& Objects.equals(normalizeList(a.getColumnNames()), normalizeList(b.getColumnNames()))
+				&& Objects.equals(a.getReferencedTableName(), b.getReferencedTableName())
+				&& Objects.equals(normalizeList(a.getReferencedColumnNames()),
+						normalizeList(b.getReferencedColumnNames()));
+	}
+
+	// -------------------------------------------------------------------------
+	// Formatting utilities
+	// -------------------------------------------------------------------------
+
+	private static String quote(final String name) {
+		if (name == null) {
+			return "\"\"";
+		}
+		return "\"" + name.replace("\"", "\"\"") + "\"";
+	}
+
+	private static String quoteList(final List<String> names) {
+		if (names == null || names.isEmpty()) {
+			return "";
+		}
+		final StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < names.size(); i++) {
+			if (i > 0) {
+				sb.append(", ");
+			}
+			sb.append(quote(names.get(i)));
+		}
+		return sb.toString();
+	}
+
+	private static String qualifiedName(final String schemaName, final String tableName) {
+		if (schemaName == null || schemaName.isEmpty()) {
+			return quote(tableName);
+		}
+		return quote(schemaName) + "." + quote(tableName);
+	}
+
+	/** Returns only the table part from a {@code "schema"."table"} string. */
+	private static String unqualifiedName(final String qualifiedTable) {
+		final int dot = qualifiedTable.lastIndexOf('.');
+		final String raw = dot >= 0 ? qualifiedTable.substring(dot + 1) : qualifiedTable;
+		// Strip surrounding quotes
+		return raw.startsWith("\"") && raw.endsWith("\"")
+				? raw.substring(1, raw.length() - 1)
+				: raw;
+	}
+
+	private static String sqlString(final String value) {
+		if (value == null) {
+			return "NULL";
+		}
+		return "'" + value.replace("'", "''") + "'";
+	}
+
+	private static List<String> normalizeList(final List<String> list) {
+		if (list == null) {
+			return new ArrayList<>();
+		}
+		final List<String> normalized = new ArrayList<>(list.size());
+		for (final String s : list) {
+			normalized.add(s == null ? null : s.toLowerCase().trim());
+		}
+		return normalized;
+	}
+}

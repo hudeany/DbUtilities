@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Stack;
 
 import de.soderer.utilities.db.DbUtilities;
-import de.soderer.utilities.db.DbUtilities.DbVendor;
+import de.soderer.utilities.db.data.DbVendor;
 import de.soderer.utilities.db.utilities.CaseInsensitiveSet;
 
 public class SqlStatementFormatter {
@@ -22,7 +22,7 @@ public class SqlStatementFormatter {
 		Case
 	}
 
-	private DbVendor dbVendor;
+	private de.soderer.utilities.db.data.DbVendor dbVendor;
 	private String indentation;
 	private String lineBreak;
 

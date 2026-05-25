@@ -1,4 +1,4 @@
-package de.soderer.utilities.db;
+package de.soderer.utilities.db.oracle;
 
 import java.io.BufferedReader;
 import java.io.Closeable;

@@ -13,6 +13,14 @@ import java.util.Map.Entry;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import de.soderer.utilities.db.data.DbColumn;
+import de.soderer.utilities.db.data.DbColumnType;
+import de.soderer.utilities.db.data.DbForeignKey;
+import de.soderer.utilities.db.data.DbSchema;
+import de.soderer.utilities.db.data.DbStructure;
+import de.soderer.utilities.db.data.DbTable;
+import de.soderer.utilities.db.exception.DbStructureException;
+
 /**
  * Parses a stream of SQL DDL statements (CREATE SCHEMA / CREATE TABLE) and
  * populates a {@link DbStructure}.
