@@ -45,6 +45,80 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * </ul>
  */
 public class SqlDdlMigrationGenerator {
+
+	// -------------------------------------------------------------------------
+	// Statistics
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Accumulates counts of every structural change detected during a diff run.
+	 * One instance is created per {@link #diff} call and written as a comment
+	 * block at the top of the generated migration script.
+	 */
+	private static class MigrationStatistics {
+		int schemasCreated   = 0;
+		int schemasDropped   = 0;
+		int tablesCreated    = 0;
+		int tablesDropped    = 0;
+		int columnsAdded     = 0;
+		int columnsDropped   = 0;
+		int columnsTypeChanged      = 0;
+		int columnsNullChanged      = 0;
+		int columnsDefaultChanged   = 0;
+		int columnsCommentChanged   = 0;
+		int primaryKeysChanged      = 0;
+		int uniqueKeysAdded         = 0;
+		int uniqueKeysDropped       = 0;
+		int foreignKeysAdded        = 0;
+		int foreignKeysDropped      = 0;
+		int commentsChanged         = 0; // table / schema comments
+
+		/** Returns {@code true} when not a single change was recorded. */
+		boolean isEmpty() {
+			return schemasCreated == 0 && schemasDropped == 0
+					&& tablesCreated == 0 && tablesDropped == 0
+					&& columnsAdded == 0 && columnsDropped == 0
+					&& columnsTypeChanged == 0 && columnsNullChanged == 0
+					&& columnsDefaultChanged == 0 && columnsCommentChanged == 0
+					&& primaryKeysChanged == 0
+					&& uniqueKeysAdded == 0 && uniqueKeysDropped == 0
+					&& foreignKeysAdded == 0 && foreignKeysDropped == 0
+					&& commentsChanged == 0;
+		}
+
+		/** Formats the statistics as a multi-line SQL comment block. */
+		void writeTo(final PrintWriter writer) {
+			writer.println("-- ============================================================");
+			writer.println("-- Migration Statistics");
+			writer.println("-- ============================================================");
+			writer.println("--");
+			writer.println("--  Schemas  created  : " + schemasCreated);
+			writer.println("--           dropped  : " + schemasDropped);
+			writer.println("--");
+			writer.println("--  Tables   created  : " + tablesCreated);
+			writer.println("--           dropped  : " + tablesDropped);
+			writer.println("--");
+			writer.println("--  Columns  added    : " + columnsAdded);
+			writer.println("--           dropped  : " + columnsDropped);
+			writer.println("--           type     : " + columnsTypeChanged);
+			writer.println("--           nullable : " + columnsNullChanged);
+			writer.println("--           default  : " + columnsDefaultChanged);
+			writer.println("--           comment  : " + columnsCommentChanged);
+			writer.println("--");
+			writer.println("--  PK       changed  : " + primaryKeysChanged);
+			writer.println("--");
+			writer.println("--  Unique   added    : " + uniqueKeysAdded);
+			writer.println("--           dropped  : " + uniqueKeysDropped);
+			writer.println("--");
+			writer.println("--  FK       added    : " + foreignKeysAdded);
+			writer.println("--           dropped  : " + foreignKeysDropped);
+			writer.println("--");
+			writer.println("--  Comments changed  : " + commentsChanged);
+			writer.println("-- ============================================================");
+			writer.println();
+		}
+	}
+
 	/**
 	 * Reads {@code sourceSqlData} and {@code destinationSqlData}, computes the
 	 * structural diff, and writes the resulting migration script to
@@ -54,12 +128,14 @@ public class SqlDdlMigrationGenerator {
 		final DbStructure source = SqlDdlParser.parse(sourceSqlData);
 		final DbStructure destination = SqlDdlParser.parse(destinationSqlData);
 
-		final List<String> statements = diffStructures(source, destination);
+		final MigrationStatistics stats = new MigrationStatistics();
+		final List<String> statements = diffStructures(source, destination, stats);
 
 		try (final PrintWriter writer = new PrintWriter(new OutputStreamWriter(diffSqlData, StandardCharsets.UTF_8))) {
 			writer.println("-- Migration script");
 			writer.println("-- Generated  : " + java.time.LocalDateTime.now());
 			writer.println();
+			stats.writeTo(writer);
 			if (statements.isEmpty()) {
 				writer.println("-- No structural differences detected.");
 			} else {
@@ -79,7 +155,7 @@ public class SqlDdlMigrationGenerator {
 	 * @param destination desired database structure
 	 * @return ordered list of SQL statements (may be empty, never {@code null})
 	 */
-	private static List<String> diffStructures(final DbStructure source, final DbStructure destination) {
+	private static List<String> diffStructures(final DbStructure source, final DbStructure destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 
 		final Map<String, DbSchema> srcSchemas = source.getSchemas();
@@ -92,8 +168,10 @@ public class SqlDdlMigrationGenerator {
 				final DbSchema srcSchema = srcSchemas.get(schemaName);
 				for (final String tableName : srcSchema.getTables().keySet()) {
 					statements.add(dropTable(schemaName, tableName));
+					stats.tablesDropped++;
 				}
 				statements.add("DROP SCHEMA " + quote(schemaName) + ";");
+				stats.schemasDropped++;
 			}
 		}
 
@@ -102,9 +180,11 @@ public class SqlDdlMigrationGenerator {
 			final String schemaName = dstEntry.getKey();
 			if (!srcSchemas.containsKey(schemaName)) {
 				statements.add("CREATE SCHEMA " + quote(schemaName) + ";");
+				stats.schemasCreated++;
 				// Create all tables in the new schema
 				for (final Map.Entry<String, DbTable> tblEntry : dstEntry.getValue().getTables().entrySet()) {
 					statements.addAll(createTable(schemaName, tblEntry.getValue()));
+					stats.tablesCreated++;
 				}
 			}
 		}
@@ -118,7 +198,7 @@ public class SqlDdlMigrationGenerator {
 			final DbSchema srcSchema = srcEntry.getValue();
 			final DbSchema dstSchema = dstSchemas.get(schemaName);
 
-			statements.addAll(diffSchema(schemaName, srcSchema, dstSchema));
+			statements.addAll(diffSchema(schemaName, srcSchema, dstSchema, stats));
 		}
 
 		return statements;
@@ -128,7 +208,7 @@ public class SqlDdlMigrationGenerator {
 	// Schema-level diff
 	// -------------------------------------------------------------------------
 
-	private static List<String> diffSchema(final String schemaName, final DbSchema source, final DbSchema destination) {
+	private static List<String> diffSchema(final String schemaName, final DbSchema source, final DbSchema destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 
 		final Map<String, DbTable> srcTables = source.getTables();
@@ -138,6 +218,7 @@ public class SqlDdlMigrationGenerator {
 		for (final String tableName : srcTables.keySet()) {
 			if (!dstTables.containsKey(tableName)) {
 				statements.add(dropTable(schemaName, tableName));
+				stats.tablesDropped++;
 			}
 		}
 
@@ -145,6 +226,7 @@ public class SqlDdlMigrationGenerator {
 		for (final Map.Entry<String, DbTable> dstEntry : dstTables.entrySet()) {
 			if (!srcTables.containsKey(dstEntry.getKey())) {
 				statements.addAll(createTable(schemaName, dstEntry.getValue()));
+				stats.tablesCreated++;
 			}
 		}
 
@@ -152,7 +234,7 @@ public class SqlDdlMigrationGenerator {
 		for (final Map.Entry<String, DbTable> srcEntry : srcTables.entrySet()) {
 			final String tableName = srcEntry.getKey();
 			if (dstTables.containsKey(tableName)) {
-				statements.addAll(diffTable(schemaName, srcEntry.getValue(), dstTables.get(tableName)));
+				statements.addAll(diffTable(schemaName, srcEntry.getValue(), dstTables.get(tableName), stats));
 			}
 		}
 
@@ -161,6 +243,7 @@ public class SqlDdlMigrationGenerator {
 				&& destination.getSchemaComment() != null) {
 			statements.add("COMMENT ON SCHEMA " + quote(schemaName)
 					+ " IS " + sqlString(destination.getSchemaComment()) + ";");
+			stats.commentsChanged++;
 		}
 
 		return statements;
@@ -170,7 +253,7 @@ public class SqlDdlMigrationGenerator {
 	// Table-level diff
 	// -------------------------------------------------------------------------
 
-	private static List<String> diffTable(final String schemaName, final DbTable source, final DbTable destination) {
+	private static List<String> diffTable(final String schemaName, final DbTable source, final DbTable destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 		final String qualifiedTable = qualifiedName(schemaName, destination.getTableName());
 
@@ -183,6 +266,7 @@ public class SqlDdlMigrationGenerator {
 			if (!dstCols.containsKey(colName)) {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " DROP COLUMN " + quote(colName) + ";");
+				stats.columnsDropped++;
 			}
 		}
 
@@ -191,6 +275,7 @@ public class SqlDdlMigrationGenerator {
 			if (!srcCols.containsKey(dstEntry.getKey())) {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " ADD COLUMN " + columnDefinition(dstEntry.getValue()) + ";");
+				stats.columnsAdded++;
 			}
 		}
 
@@ -200,23 +285,28 @@ public class SqlDdlMigrationGenerator {
 			if (!dstCols.containsKey(colName)) {
 				continue;
 			}
-			statements.addAll(diffColumn(qualifiedTable, srcEntry.getValue(), dstCols.get(colName)));
+			statements.addAll(diffColumn(qualifiedTable, srcEntry.getValue(), dstCols.get(colName), stats));
 		}
 
 		// ---- Primary key ----
+		final int pksBefore = statements.size();
 		statements.addAll(diffPrimaryKey(qualifiedTable, source, destination));
+		if (statements.size() > pksBefore) {
+			stats.primaryKeysChanged++;
+		}
 
 		// ---- Unique keys ----
-		statements.addAll(diffUniqueKeys(qualifiedTable, source.getUniqueKeys(), destination.getUniqueKeys()));
+		statements.addAll(diffUniqueKeys(qualifiedTable, source.getUniqueKeys(), destination.getUniqueKeys(), stats));
 
 		// ---- Foreign keys ----
-		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys()));
+		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys(), stats));
 
 		// ---- Table comment ----
 		if (!Objects.equals(source.getTableComment(), destination.getTableComment())
 				&& destination.getTableComment() != null) {
 			statements.add("COMMENT ON TABLE " + qualifiedTable
 					+ " IS " + sqlString(destination.getTableComment()) + ";");
+			stats.commentsChanged++;
 		}
 
 		return statements;
@@ -227,7 +317,7 @@ public class SqlDdlMigrationGenerator {
 	// -------------------------------------------------------------------------
 
 	private static List<String> diffColumn(final String qualifiedTable, final DbColumn source,
-			final DbColumn destination) {
+			final DbColumn destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 		final String colName = quote(destination.getColumnName());
 		final DbColumnType srcType = source.getColumnType();
@@ -242,6 +332,7 @@ public class SqlDdlMigrationGenerator {
 			statements.add("ALTER TABLE " + qualifiedTable
 					+ " ALTER COLUMN " + colName
 					+ " TYPE " + sqlTypeName(dstType) + ";");
+			stats.columnsTypeChanged++;
 		}
 
 		// Nullability changed?
@@ -253,6 +344,7 @@ public class SqlDdlMigrationGenerator {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " ALTER COLUMN " + colName + " SET NOT NULL;");
 			}
+			stats.columnsNullChanged++;
 		}
 
 		// Default value changed?
@@ -264,6 +356,7 @@ public class SqlDdlMigrationGenerator {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " ALTER COLUMN " + colName + " SET DEFAULT " + dstType.getDefaultValue() + ";");
 			}
+			stats.columnsDefaultChanged++;
 		}
 
 		// Column comment changed?
@@ -271,6 +364,7 @@ public class SqlDdlMigrationGenerator {
 				&& destination.getColumnComment() != null) {
 			statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + colName
 					+ " IS " + sqlString(destination.getColumnComment()) + ";");
+			stats.columnsCommentChanged++;
 		}
 
 		return statements;
@@ -317,7 +411,8 @@ public class SqlDdlMigrationGenerator {
 
 	private static List<String> diffUniqueKeys(final String qualifiedTable,
 			final Map<String, List<String>> srcUniqueKeys,
-			final Map<String, List<String>> dstUniqueKeys) {
+			final Map<String, List<String>> dstUniqueKeys,
+			final MigrationStatistics stats) {
 
 		final List<String> statements = new ArrayList<>();
 		final Map<String, List<String>> src = srcUniqueKeys != null ? srcUniqueKeys : new LinkedHashMap<>();
@@ -329,6 +424,7 @@ public class SqlDdlMigrationGenerator {
 			if (!dst.containsKey(name) || !normalizeList(srcEntry.getValue()).equals(normalizeList(dst.get(name)))) {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " DROP CONSTRAINT IF EXISTS " + quote(name) + ";");
+				stats.uniqueKeysDropped++;
 			}
 		}
 
@@ -341,6 +437,7 @@ public class SqlDdlMigrationGenerator {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " ADD CONSTRAINT " + quote(name)
 						+ " UNIQUE (" + quoteList(dstEntry.getValue()) + ");");
+				stats.uniqueKeysAdded++;
 			}
 		}
 
@@ -352,7 +449,8 @@ public class SqlDdlMigrationGenerator {
 	// -------------------------------------------------------------------------
 
 	private static List<String> diffForeignKeys(final String qualifiedTable,
-			final List<DbForeignKey> srcForeignKeys, final List<DbForeignKey> dstForeignKeys) {
+			final List<DbForeignKey> srcForeignKeys, final List<DbForeignKey> dstForeignKeys,
+			final MigrationStatistics stats) {
 
 		final List<String> statements = new ArrayList<>();
 		final List<DbForeignKey> src = srcForeignKeys != null ? srcForeignKeys : new ArrayList<>();
@@ -367,6 +465,7 @@ public class SqlDdlMigrationGenerator {
 				if (fkName != null) {
 					statements.add("ALTER TABLE " + qualifiedTable
 							+ " DROP CONSTRAINT IF EXISTS " + quote(fkName) + ";");
+					stats.foreignKeysDropped++;
 				}
 			}
 		}
@@ -377,6 +476,7 @@ public class SqlDdlMigrationGenerator {
 					.anyMatch(srcFk -> foreignKeysEqual(srcFk, dstFk));
 			if (!alreadyExists) {
 				statements.add(addForeignKeyStatement(qualifiedTable, dstFk));
+				stats.foreignKeysAdded++;
 			}
 		}
 

@@ -41,6 +41,92 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * }</pre>
  */
 public class SqlDdlMergeGenerator {
+
+	// -------------------------------------------------------------------------
+	// Statistics
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Accumulates counts of every structural decision made during a merge run.
+	 * One instance is created per {@link #merge} call and written as a comment
+	 * block at the top of the generated merged DDL file.
+	 */
+	private static class MergeStatistics {
+		// Schemas
+		int schemasOnlyInA  = 0;
+		int schemasOnlyInB  = 0;
+		int schemasMerged   = 0;
+
+		// Tables
+		int tablesOnlyInA   = 0;
+		int tablesOnlyInB   = 0;
+		int tablesMerged    = 0;
+
+		// Columns
+		int columnsOnlyInA      = 0;
+		int columnsOnlyInB      = 0;
+		int columnsAWins        = 0; // same name in both, but B had no definition → A kept
+		int columnsBWins        = 0; // same name in both, B overrides A
+
+		// Primary keys
+		int pkFromA             = 0;
+		int pkFromB             = 0;
+		int pkBOverridesA       = 0; // both defined, B wins
+
+		// Unique keys
+		int uniqueFromA         = 0;
+		int uniqueFromB         = 0;
+		int uniqueConflicts     = 0; // same name in both, B wins
+
+		// Foreign keys
+		int fkFromA             = 0;
+		int fkFromB             = 0;
+		int fkConflicts         = 0; // same name in both, B wins
+
+		// Comments (table / schema)
+		int commentsFromA       = 0;
+		int commentsFromB       = 0;
+		int commentsBOverrideA  = 0; // both defined, B wins
+
+		/** Formats the statistics as a multi-line SQL comment block. */
+		void writeTo(final PrintWriter writer) {
+			writer.println("-- ============================================================");
+			writer.println("-- Merge Statistics");
+			writer.println("-- ============================================================");
+			writer.println("--");
+			writer.println("--  Schemas  only in A (taken over)  : " + schemasOnlyInA);
+			writer.println("--           only in B (taken over)  : " + schemasOnlyInB);
+			writer.println("--           in both  (merged)       : " + schemasMerged);
+			writer.println("--");
+			writer.println("--  Tables   only in A (taken over)  : " + tablesOnlyInA);
+			writer.println("--           only in B (taken over)  : " + tablesOnlyInB);
+			writer.println("--           in both  (merged)       : " + tablesMerged);
+			writer.println("--");
+			writer.println("--  Columns  only in A (taken over)  : " + columnsOnlyInA);
+			writer.println("--           only in B (taken over)  : " + columnsOnlyInB);
+			writer.println("--           in both  - A kept       : " + columnsAWins);
+			writer.println("--           in both  - B overrides  : " + columnsBWins);
+			writer.println("--");
+			writer.println("--  PK       from A                  : " + pkFromA);
+			writer.println("--           from B                  : " + pkFromB);
+			writer.println("--           B overrides A           : " + pkBOverridesA);
+			writer.println("--");
+			writer.println("--  Unique   from A                  : " + uniqueFromA);
+			writer.println("--           from B                  : " + uniqueFromB);
+			writer.println("--           conflicts (B wins)      : " + uniqueConflicts);
+			writer.println("--");
+			writer.println("--  FK       from A                  : " + fkFromA);
+			writer.println("--           from B                  : " + fkFromB);
+			writer.println("--           conflicts (B wins)      : " + fkConflicts);
+			writer.println("--");
+			writer.println("--  Comments from A                  : " + commentsFromA);
+			writer.println("--           from B                  : " + commentsFromB);
+			writer.println("--           B overrides A           : " + commentsBOverrideA);
+			writer.println("-- ============================================================");
+			writer.println();
+		}
+	}
+
 	/**
 	 * Parses {@code structureSqlDataA} and {@code structureSqlDataB}, merges their structures, and writes
 	 * the resulting unified DDL to {@code mergeSqlData}.
@@ -55,12 +141,14 @@ public class SqlDdlMergeGenerator {
 		final DbStructure structureA = SqlDdlParser.parse(structureSqlDataA);
 		final DbStructure structureB = SqlDdlParser.parse(structureSqlDataB);
 
-		final DbStructure merged = mergeStructures(structureA, structureB);
+		final MergeStatistics stats = new MergeStatistics();
+		final DbStructure merged = mergeStructures(structureA, structureB, stats);
 
 		try (final PrintWriter writer = new PrintWriter(new OutputStreamWriter(mergeSqlData, StandardCharsets.UTF_8))) {
 			writer.println("-- Merged DDL");
 			writer.println("-- Generated: " + java.time.LocalDateTime.now());
 			writer.println();
+			stats.writeTo(writer);
 
 			for (final Map.Entry<String, DbSchema> schemaEntry : merged.getSchemas().entrySet()) {
 				final String schemaName = schemaEntry.getKey();
@@ -86,7 +174,7 @@ public class SqlDdlMergeGenerator {
 	 * {@code b}. When the same schema / table / column appears in both,
 	 * {@code b} is authoritative.
 	 */
-	private static DbStructure mergeStructures(final DbStructure a, final DbStructure b) throws DbStructureException {
+	private static DbStructure mergeStructures(final DbStructure a, final DbStructure b, final MergeStatistics stats) throws DbStructureException {
 		final DbStructure result = new DbStructure();
 
 		// Collect all schema names (order: A first, then new ones from B)
@@ -101,14 +189,22 @@ public class SqlDdlMergeGenerator {
 			final DbSchema schemaA = a.getSchemas().get(schemaName);
 			final DbSchema schemaB = b.getSchemas().get(schemaName);
 
-			final DbSchema mergedSchema = mergeSchemas(schemaA, schemaB);
+			if (schemaA != null && schemaB == null) {
+				stats.schemasOnlyInA++;
+			} else if (schemaA == null && schemaB != null) {
+				stats.schemasOnlyInB++;
+			} else {
+				stats.schemasMerged++;
+			}
+
+			final DbSchema mergedSchema = mergeSchemas(schemaA, schemaB, stats);
 			result.createSchema(schemaName, mergedSchema);
 		}
 
 		return result;
 	}
 
-	private static DbSchema mergeSchemas(final DbSchema schemaA, final DbSchema schemaB) throws DbStructureException {
+	private static DbSchema mergeSchemas(final DbSchema schemaA, final DbSchema schemaB, final MergeStatistics stats) throws DbStructureException {
 		// One of the two may be null when the schema exists only in one file
 		final DbSchema base = schemaA != null ? schemaA : schemaB;
 		final DbSchema other = schemaA != null ? schemaB : null;
@@ -117,11 +213,16 @@ public class SqlDdlMergeGenerator {
 		result.setSchemaName(base.getSchemaName());
 
 		// Comment: B wins
-		final String comment = (other != null && other.getSchemaComment() != null)
-				? other.getSchemaComment()
-				: base.getSchemaComment();
-		if (comment != null) {
-			result.setSchemaComment(comment);
+		if (other != null && other.getSchemaComment() != null) {
+			result.setSchemaComment(other.getSchemaComment());
+			if (base.getSchemaComment() != null) {
+				stats.commentsBOverrideA++;
+			} else {
+				stats.commentsFromB++;
+			}
+		} else if (base.getSchemaComment() != null) {
+			result.setSchemaComment(base.getSchemaComment());
+			stats.commentsFromA++;
 		}
 
 		if (other == null) {
@@ -143,14 +244,23 @@ public class SqlDdlMergeGenerator {
 		for (final String tableName : tableNames) {
 			final DbTable tableA = base.getTables().get(tableName);
 			final DbTable tableB = other.getTables().get(tableName);
-			final DbTable mergedTable = mergeTables(tableA, tableB);
+
+			if (tableA != null && tableB == null) {
+				stats.tablesOnlyInA++;
+			} else if (tableA == null && tableB != null) {
+				stats.tablesOnlyInB++;
+			} else {
+				stats.tablesMerged++;
+			}
+
+			final DbTable mergedTable = mergeTables(tableA, tableB, stats);
 			result.createTable(tableName, mergedTable);
 		}
 
 		return result;
 	}
 
-	private static DbTable mergeTables(final DbTable tableA, final DbTable tableB) throws DbStructureException {
+	private static DbTable mergeTables(final DbTable tableA, final DbTable tableB, final MergeStatistics stats) throws DbStructureException {
 		// One may be null when the table exists only in one file
 		final DbTable base = tableA != null ? tableA : tableB;
 		final DbTable other = tableA != null ? tableB : null;
@@ -159,22 +269,46 @@ public class SqlDdlMergeGenerator {
 		result.setTableName(base.getTableName());
 
 		if (other == null) {
-			// Table only in one file — copy verbatim
+			// Table only in one file — copy verbatim (stats already counted in mergeSchemas)
 			for (final Map.Entry<String, DbColumn> e : base.getColumns().entrySet()) {
 				result.createColumn(e.getKey(), e.getValue());
 			}
 			result.setPrimaryKey(base.getPrimaryKey());
+			if (base.getPrimaryKey() != null && !base.getPrimaryKey().isEmpty()) {
+				if (tableA != null) {
+					stats.pkFromA++;
+				} else {
+					stats.pkFromB++;
+				}
+			}
 			if (base.getForeignKeys() != null) {
 				for (final DbForeignKey fk : base.getForeignKeys()) {
 					result.addForeignKey(fk);
+					if (tableA != null) {
+						stats.fkFromA++;
+					} else {
+						stats.fkFromB++;
+					}
 				}
 			}
 			if (base.getUniqueKeys() != null) {
 				for (final Map.Entry<String, List<String>> uq : base.getUniqueKeys().entrySet()) {
 					result.addUniqueKey(uq.getKey(), uq.getValue());
+					if (tableA != null) {
+						stats.uniqueFromA++;
+					} else {
+						stats.uniqueFromB++;
+					}
 				}
 			}
-			result.setTableComment(base.getTableComment());
+			if (base.getTableComment() != null) {
+				result.setTableComment(base.getTableComment());
+				if (tableA != null) {
+					stats.commentsFromA++;
+				} else {
+					stats.commentsFromB++;
+				}
+			}
 			return result;
 		}
 
@@ -188,27 +322,50 @@ public class SqlDdlMergeGenerator {
 		for (final String colName : colNames) {
 			final DbColumn colA = base.getColumns().get(colName);
 			final DbColumn colB = other.getColumns().get(colName);
-			// B wins; fall back to A when B doesn't have this column
-			result.createColumn(colName, colB != null ? colB : colA);
+			if (colA != null && colB == null) {
+				result.createColumn(colName, colA);
+				stats.columnsOnlyInA++;
+			} else if (colA == null && colB != null) {
+				result.createColumn(colName, colB);
+				stats.columnsOnlyInB++;
+			} else {
+				// Both have it: B wins
+				result.createColumn(colName, colB);
+				stats.columnsBWins++;
+			}
 		}
 
 		// ---- Primary key: B wins ----
-		final List<String> pk = (other.getPrimaryKey() != null && !other.getPrimaryKey().isEmpty())
-				? other.getPrimaryKey()
-				: base.getPrimaryKey();
-		result.setPrimaryKey(pk);
+		final boolean baseHasPk = base.getPrimaryKey() != null && !base.getPrimaryKey().isEmpty();
+		final boolean otherHasPk = other.getPrimaryKey() != null && !other.getPrimaryKey().isEmpty();
+		if (otherHasPk) {
+			result.setPrimaryKey(other.getPrimaryKey());
+			stats.pkFromB++;
+			if (baseHasPk) {
+				stats.pkBOverridesA++;
+			}
+		} else if (baseHasPk) {
+			result.setPrimaryKey(base.getPrimaryKey());
+			stats.pkFromA++;
+		}
 
 		// ---- Unique keys: union; B wins on name conflict ----
 		if (base.getUniqueKeys() != null) {
 			for (final Map.Entry<String, List<String>> uq : base.getUniqueKeys().entrySet()) {
 				if (!other.getUniqueKeys().containsKey(uq.getKey())) {
 					result.addUniqueKey(uq.getKey(), uq.getValue());
+					stats.uniqueFromA++;
 				}
+				// else: B has same name → handled below, count as conflict
 			}
 		}
 		if (other.getUniqueKeys() != null) {
 			for (final Map.Entry<String, List<String>> uq : other.getUniqueKeys().entrySet()) {
 				result.addUniqueKey(uq.getKey(), uq.getValue());
+				stats.uniqueFromB++;
+				if (base.getUniqueKeys() != null && base.getUniqueKeys().containsKey(uq.getKey())) {
+					stats.uniqueConflicts++;
+				}
 			}
 		}
 
@@ -222,22 +379,32 @@ public class SqlDdlMergeGenerator {
 										&& fk.getForeignKeyName().equals(bFk.getForeignKeyName()));
 				if (!overriddenByB) {
 					mergedFks.add(fk);
+					stats.fkFromA++;
+				} else {
+					stats.fkConflicts++;
 				}
 			}
 		}
 		if (other.getForeignKeys() != null) {
-			mergedFks.addAll(other.getForeignKeys());
+			for (final DbForeignKey fk : other.getForeignKeys()) {
+				mergedFks.add(fk);
+				stats.fkFromB++;
+			}
 		}
 		for (final DbForeignKey fk : mergedFks) {
 			result.addForeignKey(fk);
 		}
 
-		// ---- Comment: B wins ----
-		final String tableComment = other.getTableComment() != null
-				? other.getTableComment()
-				: base.getTableComment();
-		if (tableComment != null) {
-			result.setTableComment(tableComment);
+		// ---- Table comment: B wins ----
+		if (other.getTableComment() != null) {
+			result.setTableComment(other.getTableComment());
+			stats.commentsFromB++;
+			if (base.getTableComment() != null) {
+				stats.commentsBOverrideA++;
+			}
+		} else if (base.getTableComment() != null) {
+			result.setTableComment(base.getTableComment());
+			stats.commentsFromA++;
 		}
 
 		return result;
