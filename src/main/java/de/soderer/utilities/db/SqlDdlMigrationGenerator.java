@@ -622,6 +622,8 @@ public class SqlDdlMigrationGenerator {
 			return "\"\"";
 		} else if (needsQuoteForSyntax) {
 			return "\"" + name.replace("\"", "\"\"") + "\"";
+		} else if (DbUtilities.RESERVED_WORDS_POSTGRESQL.contains(name.toLowerCase())) {
+			return "\"" + name.replace("\"", "\"\"") + "\"";
 		} else {
 			return name;
 		}
