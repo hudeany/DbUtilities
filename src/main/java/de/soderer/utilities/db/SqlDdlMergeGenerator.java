@@ -7,6 +7,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -41,16 +42,6 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * }</pre>
  */
 public class SqlDdlMergeGenerator {
-
-	// -------------------------------------------------------------------------
-	// Statistics
-	// -------------------------------------------------------------------------
-
-	/**
-	 * Accumulates counts of every structural decision made during a merge run.
-	 * One instance is created per {@link #merge} call and written as a comment
-	 * block at the top of the generated merged DDL file.
-	 */
 	private static class MergeStatistics {
 		// Schemas
 		int schemasOnlyInA  = 0;
@@ -88,56 +79,76 @@ public class SqlDdlMergeGenerator {
 		int commentsFromB       = 0;
 		int commentsBOverrideA  = 0; // both defined, B wins
 
-		/** Formats the statistics as a multi-line SQL comment block. */
+		private static void writeLine(final PrintWriter writer, final String label, final int value) {
+			if (value > 0) {
+				writer.println("--  " + label + value);
+			}
+		}
+
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
 			writer.println("-- Merge Statistics");
 			writer.println("-- ============================================================");
 			writer.println("--");
-			writer.println("--  Schemas  only in A (taken over)  : " + schemasOnlyInA);
-			writer.println("--           only in B (taken over)  : " + schemasOnlyInB);
-			writer.println("--           in both  (merged)       : " + schemasMerged);
+			writeLine(writer, "Schemas  only in A (taken over)  : ", schemasOnlyInA);
+			writeLine(writer, "         only in B (taken over)  : ", schemasOnlyInB);
+			writeLine(writer, "         in both  (merged)       : ", schemasMerged);
 			writer.println("--");
-			writer.println("--  Tables   only in A (taken over)  : " + tablesOnlyInA);
-			writer.println("--           only in B (taken over)  : " + tablesOnlyInB);
-			writer.println("--           in both  (merged)       : " + tablesMerged);
+			writeLine(writer, "Tables   only in A (taken over)  : ", tablesOnlyInA);
+			writeLine(writer, "         only in B (taken over)  : ", tablesOnlyInB);
+			writeLine(writer, "         in both  (merged)       : ", tablesMerged);
 			writer.println("--");
-			writer.println("--  Columns  only in A (taken over)  : " + columnsOnlyInA);
-			writer.println("--           only in B (taken over)  : " + columnsOnlyInB);
-			writer.println("--           in both  - A kept       : " + columnsAWins);
-			writer.println("--           in both  - B overrides  : " + columnsBWins);
+			writeLine(writer, "Columns  only in A (taken over)  : ", columnsOnlyInA);
+			writeLine(writer, "         only in B (taken over)  : ", columnsOnlyInB);
+			writeLine(writer, "         in both  - A kept       : ", columnsAWins);
+			writeLine(writer, "         in both  - B overrides  : ", columnsBWins);
 			writer.println("--");
-			writer.println("--  PK       from A                  : " + pkFromA);
-			writer.println("--           from B                  : " + pkFromB);
-			writer.println("--           B overrides A           : " + pkBOverridesA);
+			writeLine(writer, "PK       from A                  : ", pkFromA);
+			writeLine(writer, "         from B                  : ", pkFromB);
+			writeLine(writer, "         B overrides A           : ", pkBOverridesA);
 			writer.println("--");
-			writer.println("--  Unique   from A                  : " + uniqueFromA);
-			writer.println("--           from B                  : " + uniqueFromB);
-			writer.println("--           conflicts (B wins)      : " + uniqueConflicts);
+			writeLine(writer, "Unique   from A                  : ", uniqueFromA);
+			writeLine(writer, "         from B                  : ", uniqueFromB);
+			writeLine(writer, "         conflicts (B wins)      : ", uniqueConflicts);
 			writer.println("--");
-			writer.println("--  FK       from A                  : " + fkFromA);
-			writer.println("--           from B                  : " + fkFromB);
-			writer.println("--           conflicts (B wins)      : " + fkConflicts);
+			writeLine(writer, "FK       from A                  : ", fkFromA);
+			writeLine(writer, "         from B                  : ", fkFromB);
+			writeLine(writer, "         conflicts (B wins)      : ", fkConflicts);
 			writer.println("--");
-			writer.println("--  Comments from A                  : " + commentsFromA);
-			writer.println("--           from B                  : " + commentsFromB);
-			writer.println("--           B overrides A           : " + commentsBOverrideA);
+			writeLine(writer, "Comments from A                  : ", commentsFromA);
+			writeLine(writer, "         from B                  : ", commentsFromB);
+			writeLine(writer, "         B overrides A           : ", commentsBOverrideA);
 			writer.println("-- ============================================================");
 			writer.println();
 		}
 	}
 
 	/**
-	 * Parses {@code structureSqlDataA} and {@code structureSqlDataB}, merges their structures, and writes
-	 * the resulting unified DDL to {@code mergeSqlData}.
+	 * Convenience overload without sorting.
+	 */
+	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB,
+			final OutputStream mergeSqlData) throws IOException, DbStructureException {
+		merge(structureSqlDataA, structureSqlDataB, mergeSqlData, false, false, false);
+	}
+
+	/**
+	 * Parses {@code structureSqlDataA} and {@code structureSqlDataB}, merges their
+	 * structures, and writes the resulting unified DDL to {@code mergeSqlData}.
 	 *
-	 * @param fileA      first SQL DDL file
-	 * @param fileB      second SQL DDL file (wins on conflicts)
-	 * @param outputFile path where the merged DDL will be written
+	 * @param structureSqlDataA first SQL DDL input stream
+	 * @param structureSqlDataB second SQL DDL input stream (wins on conflicts)
+	 * @param mergeSqlData      output stream for the merged DDL
+	 * @param sortBySchema      if {@code true}, schemas are emitted in alphabetical order
+	 * @param sortByTable       if {@code true}, tables within each schema are emitted in alphabetical order
+	 * @param sortByColumn      if {@code true}, columns within each table are emitted in alphabetical order
 	 * @throws IOException          on read / write errors
 	 * @throws DbStructureException if either file contains structural errors
 	 */
-	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB, final OutputStream mergeSqlData) throws IOException, DbStructureException {
+	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB,
+			final OutputStream mergeSqlData,
+			final boolean sortBySchema, final boolean sortByTable, final boolean sortByColumn)
+			throws IOException, DbStructureException {
+
 		final DbStructure structureA = SqlDdlParser.parse(structureSqlDataA);
 		final DbStructure structureB = SqlDdlParser.parse(structureSqlDataB);
 
@@ -150,9 +161,13 @@ public class SqlDdlMergeGenerator {
 			writer.println();
 			stats.writeTo(writer);
 
-			for (final Map.Entry<String, DbSchema> schemaEntry : merged.getSchemas().entrySet()) {
-				final String schemaName = schemaEntry.getKey();
-				final DbSchema schema = schemaEntry.getValue();
+			final List<String> schemaNames = new ArrayList<>(merged.getSchemas().keySet());
+			if (sortBySchema) {
+				schemaNames.sort(Comparator.naturalOrder());
+			}
+
+			for (final String schemaName : schemaNames) {
+				final DbSchema schema = merged.getSchemas().get(schemaName);
 
 				if (!schemaName.isEmpty()) {
 					writer.println("CREATE SCHEMA " + quote(schemaName) + ";");
@@ -162,22 +177,21 @@ public class SqlDdlMergeGenerator {
 					writer.println();
 				}
 
-				for (final DbTable table : schema.getTables().values()) {
-					writeCreateTable(writer, schemaName, table);
+				final List<DbTable> tables = new ArrayList<>(schema.getTables().values());
+				if (sortByTable) {
+					tables.sort(Comparator.comparing(DbTable::getTableName));
+				}
+
+				for (final DbTable table : tables) {
+					writeCreateTable(writer, schemaName, table, sortByColumn);
 				}
 			}
 		}
 	}
 
-	/**
-	 * Returns a new {@link DbStructure} that is the union of {@code a} and
-	 * {@code b}. When the same schema / table / column appears in both,
-	 * {@code b} is authoritative.
-	 */
 	private static DbStructure mergeStructures(final DbStructure a, final DbStructure b, final MergeStatistics stats) throws DbStructureException {
 		final DbStructure result = new DbStructure();
 
-		// Collect all schema names (order: A first, then new ones from B)
 		final List<String> schemaNames = new ArrayList<>(a.getSchemas().keySet());
 		for (final String name : b.getSchemas().keySet()) {
 			if (!schemaNames.contains(name)) {
@@ -205,14 +219,12 @@ public class SqlDdlMergeGenerator {
 	}
 
 	private static DbSchema mergeSchemas(final DbSchema schemaA, final DbSchema schemaB, final MergeStatistics stats) throws DbStructureException {
-		// One of the two may be null when the schema exists only in one file
 		final DbSchema base = schemaA != null ? schemaA : schemaB;
 		final DbSchema other = schemaA != null ? schemaB : null;
 
 		final DbSchema result = new DbSchema();
 		result.setSchemaName(base.getSchemaName());
 
-		// Comment: B wins
 		if (other != null && other.getSchemaComment() != null) {
 			result.setSchemaComment(other.getSchemaComment());
 			if (base.getSchemaComment() != null) {
@@ -226,14 +238,12 @@ public class SqlDdlMergeGenerator {
 		}
 
 		if (other == null) {
-			// Only one side has this schema — copy all tables verbatim
 			for (final Map.Entry<String, DbTable> e : base.getTables().entrySet()) {
 				result.createTable(e.getKey(), e.getValue());
 			}
 			return result;
 		}
 
-		// Both sides have this schema — merge tables
 		final List<String> tableNames = new ArrayList<>(base.getTables().keySet());
 		for (final String name : other.getTables().keySet()) {
 			if (!tableNames.contains(name)) {
@@ -261,7 +271,6 @@ public class SqlDdlMergeGenerator {
 	}
 
 	private static DbTable mergeTables(final DbTable tableA, final DbTable tableB, final MergeStatistics stats) throws DbStructureException {
-		// One may be null when the table exists only in one file
 		final DbTable base = tableA != null ? tableA : tableB;
 		final DbTable other = tableA != null ? tableB : null;
 
@@ -269,7 +278,6 @@ public class SqlDdlMergeGenerator {
 		result.setTableName(base.getTableName());
 
 		if (other == null) {
-			// Table only in one file — copy verbatim (stats already counted in mergeSchemas)
 			for (final Map.Entry<String, DbColumn> e : base.getColumns().entrySet()) {
 				result.createColumn(e.getKey(), e.getValue());
 			}
@@ -312,7 +320,6 @@ public class SqlDdlMergeGenerator {
 			return result;
 		}
 
-		// ---- Columns: A first, then new ones from B; B wins on conflict ----
 		final List<String> colNames = new ArrayList<>(base.getColumns().keySet());
 		for (final String name : other.getColumns().keySet()) {
 			if (!colNames.contains(name)) {
@@ -335,7 +342,6 @@ public class SqlDdlMergeGenerator {
 			}
 		}
 
-		// ---- Primary key: B wins ----
 		final boolean baseHasPk = base.getPrimaryKey() != null && !base.getPrimaryKey().isEmpty();
 		final boolean otherHasPk = other.getPrimaryKey() != null && !other.getPrimaryKey().isEmpty();
 		if (otherHasPk) {
@@ -349,14 +355,12 @@ public class SqlDdlMergeGenerator {
 			stats.pkFromA++;
 		}
 
-		// ---- Unique keys: union; B wins on name conflict ----
 		if (base.getUniqueKeys() != null) {
 			for (final Map.Entry<String, List<String>> uq : base.getUniqueKeys().entrySet()) {
 				if (!other.getUniqueKeys().containsKey(uq.getKey())) {
 					result.addUniqueKey(uq.getKey(), uq.getValue());
 					stats.uniqueFromA++;
 				}
-				// else: B has same name → handled below, count as conflict
 			}
 		}
 		if (other.getUniqueKeys() != null) {
@@ -369,7 +373,6 @@ public class SqlDdlMergeGenerator {
 			}
 		}
 
-		// ---- Foreign keys: union by name; B wins on name conflict ----
 		final List<DbForeignKey> mergedFks = new ArrayList<>();
 		if (base.getForeignKeys() != null) {
 			for (final DbForeignKey fk : base.getForeignKeys()) {
@@ -395,7 +398,6 @@ public class SqlDdlMergeGenerator {
 			result.addForeignKey(fk);
 		}
 
-		// ---- Table comment: B wins ----
 		if (other.getTableComment() != null) {
 			result.setTableComment(other.getTableComment());
 			stats.commentsFromB++;
@@ -410,18 +412,20 @@ public class SqlDdlMergeGenerator {
 		return result;
 	}
 
-	// -------------------------------------------------------------------------
-	// DDL output
-	// -------------------------------------------------------------------------
-
-	private static void writeCreateTable(final PrintWriter writer, final String schemaName, final DbTable table) {
+	private static void writeCreateTable(final PrintWriter writer, final String schemaName, final DbTable table,
+			final boolean sortByColumn) {
 		final String qualifiedTable = qualifiedName(schemaName, table.getTableName());
 
 		writer.println("CREATE TABLE " + qualifiedTable + " (");
 
 		final List<String> entries = new ArrayList<>();
 
-		for (final DbColumn col : table.getColumns().values()) {
+		final List<DbColumn> columns = new ArrayList<>(table.getColumns().values());
+		if (sortByColumn) {
+			columns.sort(Comparator.comparing(DbColumn::getColumnName));
+		}
+
+		for (final DbColumn col : columns) {
 			entries.add("    " + columnDefinition(col));
 		}
 
@@ -456,7 +460,7 @@ public class SqlDdlMergeGenerator {
 					+ " IS " + sqlString(table.getTableComment()) + ";");
 		}
 
-		for (final DbColumn col : table.getColumns().values()) {
+		for (final DbColumn col : columns) {
 			if (col.getColumnComment() != null) {
 				writer.println("COMMENT ON COLUMN " + qualifiedTable + "." + quote(col.getColumnName())
 						+ " IS " + sqlString(col.getColumnComment()) + ";");
@@ -465,10 +469,6 @@ public class SqlDdlMergeGenerator {
 
 		writer.println();
 	}
-
-	// -------------------------------------------------------------------------
-	// SQL snippet helpers (same conventions as SqlDdlMigrationGenerator)
-	// -------------------------------------------------------------------------
 
 	private static String columnDefinition(final DbColumn col) {
 		final StringBuilder sb = new StringBuilder();

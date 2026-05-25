@@ -7,6 +7,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,23 +46,13 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * </ul>
  */
 public class SqlDdlMigrationGenerator {
-
-	// -------------------------------------------------------------------------
-	// Statistics
-	// -------------------------------------------------------------------------
-
-	/**
-	 * Accumulates counts of every structural change detected during a diff run.
-	 * One instance is created per {@link #diff} call and written as a comment
-	 * block at the top of the generated migration script.
-	 */
 	private static class MigrationStatistics {
-		int schemasCreated   = 0;
-		int schemasDropped   = 0;
-		int tablesCreated    = 0;
-		int tablesDropped    = 0;
-		int columnsAdded     = 0;
-		int columnsDropped   = 0;
+		int schemasCreated          = 0;
+		int schemasDropped          = 0;
+		int tablesCreated           = 0;
+		int tablesDropped           = 0;
+		int columnsAdded            = 0;
+		int columnsDropped          = 0;
 		int columnsTypeChanged      = 0;
 		int columnsNullChanged      = 0;
 		int columnsDefaultChanged   = 0;
@@ -73,50 +64,76 @@ public class SqlDdlMigrationGenerator {
 		int foreignKeysDropped      = 0;
 		int commentsChanged         = 0; // table / schema comments
 
-		/** Formats the statistics as a multi-line SQL comment block. */
+		private static void writeLine(final PrintWriter writer, final String label, final int value) {
+			if (value > 0) {
+				writer.println("--  " + label + value);
+			}
+		}
+
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
 			writer.println("-- Migration Statistics");
 			writer.println("-- ============================================================");
 			writer.println("--");
-			writer.println("--  Schemas  created  : " + schemasCreated);
-			writer.println("--           dropped  : " + schemasDropped);
+			writeLine(writer, "Schemas  created  : ", schemasCreated);
+			writeLine(writer, "         dropped  : ", schemasDropped);
 			writer.println("--");
-			writer.println("--  Tables   created  : " + tablesCreated);
-			writer.println("--           dropped  : " + tablesDropped);
+			writeLine(writer, "Tables   created  : ", tablesCreated);
+			writeLine(writer, "         dropped  : ", tablesDropped);
 			writer.println("--");
-			writer.println("--  Columns  added    : " + columnsAdded);
-			writer.println("--           dropped  : " + columnsDropped);
-			writer.println("--           type     : " + columnsTypeChanged);
-			writer.println("--           nullable : " + columnsNullChanged);
-			writer.println("--           default  : " + columnsDefaultChanged);
-			writer.println("--           comment  : " + columnsCommentChanged);
+			writeLine(writer, "Columns  added    : ", columnsAdded);
+			writeLine(writer, "         dropped  : ", columnsDropped);
+			writeLine(writer, "         type     : ", columnsTypeChanged);
+			writeLine(writer, "         nullable : ", columnsNullChanged);
+			writeLine(writer, "         default  : ", columnsDefaultChanged);
+			writeLine(writer, "         comment  : ", columnsCommentChanged);
 			writer.println("--");
-			writer.println("--  PK       changed  : " + primaryKeysChanged);
+			writeLine(writer, "PK       changed  : ", primaryKeysChanged);
 			writer.println("--");
-			writer.println("--  Unique   added    : " + uniqueKeysAdded);
-			writer.println("--           dropped  : " + uniqueKeysDropped);
+			writeLine(writer, "Unique   added    : ", uniqueKeysAdded);
+			writeLine(writer, "         dropped  : ", uniqueKeysDropped);
 			writer.println("--");
-			writer.println("--  FK       added    : " + foreignKeysAdded);
-			writer.println("--           dropped  : " + foreignKeysDropped);
+			writeLine(writer, "FK       added    : ", foreignKeysAdded);
+			writeLine(writer, "         dropped  : ", foreignKeysDropped);
 			writer.println("--");
-			writer.println("--  Comments changed  : " + commentsChanged);
+			writeLine(writer, "Comments changed  : ", commentsChanged);
 			writer.println("-- ============================================================");
 			writer.println();
 		}
 	}
 
 	/**
+	 * Convenience overload without sorting.
+	 */
+	public static void diff(final InputStream sourceSqlData, final InputStream destinationSqlData,
+			final OutputStream diffSqlData) throws IOException, DbStructureException {
+		diff(sourceSqlData, destinationSqlData, diffSqlData, false, false, false);
+	}
+
+	/**
 	 * Reads {@code sourceSqlData} and {@code destinationSqlData}, computes the
 	 * structural diff, and writes the resulting migration script to
 	 * {@code diffSqlData}.
+	 *
+	 * @param sourceSqlData      current database structure as SQL DDL stream
+	 * @param destinationSqlData desired database structure as SQL DDL stream
+	 * @param diffSqlData        output stream for the migration script
+	 * @param sortBySchema       if {@code true}, schema-level statements are emitted in alphabetical order
+	 * @param sortByTable        if {@code true}, table-level statements are emitted in alphabetical order per schema
+	 * @param sortByColumn       if {@code true}, column definitions in CREATE TABLE are emitted in alphabetical order
+	 * @throws IOException          on read / write errors
+	 * @throws DbStructureException if either file contains structural errors
 	 */
-	public static void diff(final InputStream sourceSqlData, final InputStream destinationSqlData, final OutputStream diffSqlData) throws IOException, DbStructureException {
+	public static void diff(final InputStream sourceSqlData, final InputStream destinationSqlData,
+			final OutputStream diffSqlData,
+			final boolean sortBySchema, final boolean sortByTable, final boolean sortByColumn)
+			throws IOException, DbStructureException {
+
 		final DbStructure source = SqlDdlParser.parse(sourceSqlData);
 		final DbStructure destination = SqlDdlParser.parse(destinationSqlData);
 
 		final MigrationStatistics stats = new MigrationStatistics();
-		final List<String> statements = diffStructures(source, destination, stats);
+		final List<String> statements = diffStructures(source, destination, stats, sortBySchema, sortByTable, sortByColumn);
 
 		try (final PrintWriter writer = new PrintWriter(new OutputStreamWriter(diffSqlData, StandardCharsets.UTF_8))) {
 			writer.println("-- Migration script");
@@ -142,90 +159,103 @@ public class SqlDdlMigrationGenerator {
 	 * @param destination desired database structure
 	 * @return ordered list of SQL statements (may be empty, never {@code null})
 	 */
-	private static List<String> diffStructures(final DbStructure source, final DbStructure destination, final MigrationStatistics stats) {
+	private static List<String> diffStructures(final DbStructure source, final DbStructure destination,
+			final MigrationStatistics stats,
+			final boolean sortBySchema, final boolean sortByTable, final boolean sortByColumn) {
+
 		final List<String> statements = new ArrayList<>();
 
 		final Map<String, DbSchema> srcSchemas = source.getSchemas();
 		final Map<String, DbSchema> dstSchemas = destination.getSchemas();
 
-		// --- Dropped schemas (present in source, absent in destination) ---
-		for (final String schemaName : srcSchemas.keySet()) {
-			if (!dstSchemas.containsKey(schemaName)) {
-				// Drop every table first, then the schema itself
+		final List<String> allSchemaNames = new ArrayList<>();
+		for (final String name : srcSchemas.keySet()) {
+			allSchemaNames.add(name);
+		}
+		for (final String name : dstSchemas.keySet()) {
+			if (!allSchemaNames.contains(name)) {
+				allSchemaNames.add(name);
+			}
+		}
+		if (sortBySchema) {
+			allSchemaNames.sort(Comparator.naturalOrder());
+		}
+
+		for (final String schemaName : allSchemaNames) {
+			final boolean inSrc = srcSchemas.containsKey(schemaName);
+			final boolean inDst = dstSchemas.containsKey(schemaName);
+
+			if (inSrc && !inDst) {
 				final DbSchema srcSchema = srcSchemas.get(schemaName);
-				for (final String tableName : srcSchema.getTables().keySet()) {
+				final List<String> tableNames = new ArrayList<>(srcSchema.getTables().keySet());
+				if (sortByTable) {
+					tableNames.sort(Comparator.naturalOrder());
+				}
+				for (final String tableName : tableNames) {
 					statements.add(dropTable(schemaName, tableName));
 					stats.tablesDropped++;
 				}
 				statements.add("DROP SCHEMA " + quote(schemaName) + ";");
 				stats.schemasDropped++;
-			}
-		}
 
-		// --- New schemas (absent in source, present in destination) ---
-		for (final Map.Entry<String, DbSchema> dstEntry : dstSchemas.entrySet()) {
-			final String schemaName = dstEntry.getKey();
-			if (!srcSchemas.containsKey(schemaName)) {
+			} else if (!inSrc && inDst) {
+				final DbSchema dstSchema = dstSchemas.get(schemaName);
 				statements.add("CREATE SCHEMA " + quote(schemaName) + ";");
 				stats.schemasCreated++;
-				// Create all tables in the new schema
-				for (final Map.Entry<String, DbTable> tblEntry : dstEntry.getValue().getTables().entrySet()) {
-					statements.addAll(createTable(schemaName, tblEntry.getValue()));
+				final List<String> tableNames = new ArrayList<>(dstSchema.getTables().keySet());
+				if (sortByTable) {
+					tableNames.sort(Comparator.naturalOrder());
+				}
+				for (final String tableName : tableNames) {
+					statements.addAll(createTable(schemaName, dstSchema.getTables().get(tableName), sortByColumn));
 					stats.tablesCreated++;
 				}
-			}
-		}
 
-		// --- Schemas present in both => diff tables ---
-		for (final Map.Entry<String, DbSchema> srcEntry : srcSchemas.entrySet()) {
-			final String schemaName = srcEntry.getKey();
-			if (!dstSchemas.containsKey(schemaName)) {
-				continue; // already handled above
+			} else {
+				statements.addAll(diffSchema(schemaName, srcSchemas.get(schemaName), dstSchemas.get(schemaName),
+						stats, sortByTable, sortByColumn));
 			}
-			final DbSchema srcSchema = srcEntry.getValue();
-			final DbSchema dstSchema = dstSchemas.get(schemaName);
-
-			statements.addAll(diffSchema(schemaName, srcSchema, dstSchema, stats));
 		}
 
 		return statements;
 	}
 
-	// -------------------------------------------------------------------------
-	// Schema-level diff
-	// -------------------------------------------------------------------------
+	private static List<String> diffSchema(final String schemaName, final DbSchema source, final DbSchema destination,
+			final MigrationStatistics stats, final boolean sortByTable, final boolean sortByColumn) {
 
-	private static List<String> diffSchema(final String schemaName, final DbSchema source, final DbSchema destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 
 		final Map<String, DbTable> srcTables = source.getTables();
 		final Map<String, DbTable> dstTables = destination.getTables();
 
-		// Dropped tables
-		for (final String tableName : srcTables.keySet()) {
-			if (!dstTables.containsKey(tableName)) {
+		final List<String> allTableNames = new ArrayList<>();
+		for (final String name : srcTables.keySet()) {
+			allTableNames.add(name);
+		}
+		for (final String name : dstTables.keySet()) {
+			if (!allTableNames.contains(name)) {
+				allTableNames.add(name);
+			}
+		}
+		if (sortByTable) {
+			allTableNames.sort(Comparator.naturalOrder());
+		}
+
+		for (final String tableName : allTableNames) {
+			final boolean inSrc = srcTables.containsKey(tableName);
+			final boolean inDst = dstTables.containsKey(tableName);
+
+			if (inSrc && !inDst) {
 				statements.add(dropTable(schemaName, tableName));
 				stats.tablesDropped++;
-			}
-		}
-
-		// New tables
-		for (final Map.Entry<String, DbTable> dstEntry : dstTables.entrySet()) {
-			if (!srcTables.containsKey(dstEntry.getKey())) {
-				statements.addAll(createTable(schemaName, dstEntry.getValue()));
+			} else if (!inSrc && inDst) {
+				statements.addAll(createTable(schemaName, dstTables.get(tableName), sortByColumn));
 				stats.tablesCreated++;
+			} else {
+				statements.addAll(diffTable(schemaName, srcTables.get(tableName), dstTables.get(tableName), stats, sortByColumn));
 			}
 		}
 
-		// Tables present in both => diff columns / constraints
-		for (final Map.Entry<String, DbTable> srcEntry : srcTables.entrySet()) {
-			final String tableName = srcEntry.getKey();
-			if (dstTables.containsKey(tableName)) {
-				statements.addAll(diffTable(schemaName, srcEntry.getValue(), dstTables.get(tableName), stats));
-			}
-		}
-
-		// Schema comment
 		if (!Objects.equals(source.getSchemaComment(), destination.getSchemaComment())
 				&& destination.getSchemaComment() != null) {
 			statements.add("COMMENT ON SCHEMA " + quote(schemaName)
@@ -236,59 +266,55 @@ public class SqlDdlMigrationGenerator {
 		return statements;
 	}
 
-	// -------------------------------------------------------------------------
-	// Table-level diff
-	// -------------------------------------------------------------------------
+	private static List<String> diffTable(final String schemaName, final DbTable source, final DbTable destination,
+			final MigrationStatistics stats, final boolean sortByColumn) {
 
-	private static List<String> diffTable(final String schemaName, final DbTable source, final DbTable destination, final MigrationStatistics stats) {
 		final List<String> statements = new ArrayList<>();
 		final String qualifiedTable = qualifiedName(schemaName, destination.getTableName());
 
-		// ---- Columns ----
 		final Map<String, DbColumn> srcCols = source.getColumns();
 		final Map<String, DbColumn> dstCols = destination.getColumns();
 
-		// Dropped columns
-		for (final String colName : srcCols.keySet()) {
-			if (!dstCols.containsKey(colName)) {
+		final List<String> allColNames = new ArrayList<>();
+		for (final String name : srcCols.keySet()) {
+			allColNames.add(name);
+		}
+		for (final String name : dstCols.keySet()) {
+			if (!allColNames.contains(name)) {
+				allColNames.add(name);
+			}
+		}
+		if (sortByColumn) {
+			allColNames.sort(Comparator.naturalOrder());
+		}
+
+		for (final String colName : allColNames) {
+			final boolean inSrc = srcCols.containsKey(colName);
+			final boolean inDst = dstCols.containsKey(colName);
+
+			if (inSrc && !inDst) {
 				statements.add("ALTER TABLE " + qualifiedTable
 						+ " DROP COLUMN " + quote(colName) + ";");
 				stats.columnsDropped++;
-			}
-		}
-
-		// New columns
-		for (final Map.Entry<String, DbColumn> dstEntry : dstCols.entrySet()) {
-			if (!srcCols.containsKey(dstEntry.getKey())) {
+			} else if (!inSrc && inDst) {
 				statements.add("ALTER TABLE " + qualifiedTable
-						+ " ADD COLUMN " + columnDefinition(dstEntry.getValue()) + ";");
+						+ " ADD COLUMN " + columnDefinition(dstCols.get(colName)) + ";");
 				stats.columnsAdded++;
+			} else {
+				statements.addAll(diffColumn(qualifiedTable, srcCols.get(colName), dstCols.get(colName), stats));
 			}
 		}
 
-		// Changed columns
-		for (final Map.Entry<String, DbColumn> srcEntry : srcCols.entrySet()) {
-			final String colName = srcEntry.getKey();
-			if (!dstCols.containsKey(colName)) {
-				continue;
-			}
-			statements.addAll(diffColumn(qualifiedTable, srcEntry.getValue(), dstCols.get(colName), stats));
-		}
-
-		// ---- Primary key ----
 		final int pksBefore = statements.size();
 		statements.addAll(diffPrimaryKey(qualifiedTable, source, destination));
 		if (statements.size() > pksBefore) {
 			stats.primaryKeysChanged++;
 		}
 
-		// ---- Unique keys ----
 		statements.addAll(diffUniqueKeys(qualifiedTable, source.getUniqueKeys(), destination.getUniqueKeys(), stats));
 
-		// ---- Foreign keys ----
 		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys(), stats));
 
-		// ---- Table comment ----
 		if (!Objects.equals(source.getTableComment(), destination.getTableComment())
 				&& destination.getTableComment() != null) {
 			statements.add("COMMENT ON TABLE " + qualifiedTable
@@ -298,10 +324,6 @@ public class SqlDdlMigrationGenerator {
 
 		return statements;
 	}
-
-	// -------------------------------------------------------------------------
-	// Column-level diff
-	// -------------------------------------------------------------------------
 
 	private static List<String> diffColumn(final String qualifiedTable, final DbColumn source,
 			final DbColumn destination, final MigrationStatistics stats) {
@@ -314,7 +336,6 @@ public class SqlDdlMigrationGenerator {
 			return statements;
 		}
 
-		// Type / size / precision changed?
 		if (!typeSignatureEquals(srcType, dstType)) {
 			statements.add("ALTER TABLE " + qualifiedTable
 					+ " ALTER COLUMN " + colName
@@ -322,7 +343,6 @@ public class SqlDdlMigrationGenerator {
 			stats.columnsTypeChanged++;
 		}
 
-		// Nullability changed?
 		if (srcType.isNullable() != dstType.isNullable()) {
 			if (dstType.isNullable()) {
 				statements.add("ALTER TABLE " + qualifiedTable
@@ -334,7 +354,6 @@ public class SqlDdlMigrationGenerator {
 			stats.columnsNullChanged++;
 		}
 
-		// Default value changed?
 		if (!Objects.equals(srcType.getDefaultValue(), dstType.getDefaultValue())) {
 			if (dstType.getDefaultValue() == null) {
 				statements.add("ALTER TABLE " + qualifiedTable
@@ -346,7 +365,6 @@ public class SqlDdlMigrationGenerator {
 			stats.columnsDefaultChanged++;
 		}
 
-		// Column comment changed?
 		if (!Objects.equals(source.getColumnComment(), destination.getColumnComment())
 				&& destination.getColumnComment() != null) {
 			statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + colName
@@ -356,10 +374,6 @@ public class SqlDdlMigrationGenerator {
 
 		return statements;
 	}
-
-	// -------------------------------------------------------------------------
-	// Primary key diff
-	// -------------------------------------------------------------------------
 
 	private static List<String> diffPrimaryKey(final String qualifiedTable, final DbTable source,
 			final DbTable destination) {
@@ -372,14 +386,10 @@ public class SqlDdlMigrationGenerator {
 			return statements;
 		}
 
-		// Drop existing PK first (PostgreSQL requires the constraint name;
-		// we use a generated name matching the common convention)
 		if (srcPk != null && !srcPk.isEmpty()) {
 			final String pkConstraintName = "pk_" + unqualifiedName(qualifiedTable);
 			statements.add("ALTER TABLE " + qualifiedTable
 					+ " DROP CONSTRAINT IF EXISTS " + quote(pkConstraintName) + ";");
-			// Fallback: generic DROP PRIMARY KEY (for MySQL)
-			// statements.add("ALTER TABLE " + qualifiedTable + " DROP PRIMARY KEY;");
 		}
 
 		if (dstPk != null && !dstPk.isEmpty()) {
@@ -392,10 +402,6 @@ public class SqlDdlMigrationGenerator {
 		return statements;
 	}
 
-	// -------------------------------------------------------------------------
-	// Unique key diff
-	// -------------------------------------------------------------------------
-
 	private static List<String> diffUniqueKeys(final String qualifiedTable,
 			final Map<String, List<String>> srcUniqueKeys,
 			final Map<String, List<String>> dstUniqueKeys,
@@ -405,7 +411,6 @@ public class SqlDdlMigrationGenerator {
 		final Map<String, List<String>> src = srcUniqueKeys != null ? srcUniqueKeys : new LinkedHashMap<>();
 		final Map<String, List<String>> dst = dstUniqueKeys != null ? dstUniqueKeys : new LinkedHashMap<>();
 
-		// Dropped unique constraints
 		for (final Map.Entry<String, List<String>> srcEntry : src.entrySet()) {
 			final String name = srcEntry.getKey();
 			if (!dst.containsKey(name) || !normalizeList(srcEntry.getValue()).equals(normalizeList(dst.get(name)))) {
@@ -415,7 +420,6 @@ public class SqlDdlMigrationGenerator {
 			}
 		}
 
-		// New or changed unique constraints
 		for (final Map.Entry<String, List<String>> dstEntry : dst.entrySet()) {
 			final String name = dstEntry.getKey();
 			final boolean existsUnchanged = src.containsKey(name)
@@ -431,10 +435,6 @@ public class SqlDdlMigrationGenerator {
 		return statements;
 	}
 
-	// -------------------------------------------------------------------------
-	// Foreign key diff
-	// -------------------------------------------------------------------------
-
 	private static List<String> diffForeignKeys(final String qualifiedTable,
 			final List<DbForeignKey> srcForeignKeys, final List<DbForeignKey> dstForeignKeys,
 			final MigrationStatistics stats) {
@@ -443,7 +443,6 @@ public class SqlDdlMigrationGenerator {
 		final List<DbForeignKey> src = srcForeignKeys != null ? srcForeignKeys : new ArrayList<>();
 		final List<DbForeignKey> dst = dstForeignKeys != null ? dstForeignKeys : new ArrayList<>();
 
-		// Dropped foreign keys (by name)
 		for (final DbForeignKey srcFk : src) {
 			final boolean stillPresent = dst.stream()
 					.anyMatch(dstFk -> foreignKeysEqual(srcFk, dstFk));
@@ -457,7 +456,6 @@ public class SqlDdlMigrationGenerator {
 			}
 		}
 
-		// New foreign keys
 		for (final DbForeignKey dstFk : dst) {
 			final boolean alreadyExists = src.stream()
 					.anyMatch(srcFk -> foreignKeysEqual(srcFk, dstFk));
@@ -470,11 +468,8 @@ public class SqlDdlMigrationGenerator {
 		return statements;
 	}
 
-	// -------------------------------------------------------------------------
-	// CREATE TABLE statement builder
-	// -------------------------------------------------------------------------
-
-	private static List<String> createTable(final String schemaName, final DbTable table) {
+	private static List<String> createTable(final String schemaName, final DbTable table,
+			final boolean sortByColumn) {
 		final List<String> statements = new ArrayList<>();
 		final String qualifiedTable = qualifiedName(schemaName, table.getTableName());
 		final StringBuilder sb = new StringBuilder();
@@ -483,12 +478,14 @@ public class SqlDdlMigrationGenerator {
 
 		final List<String> entries = new ArrayList<>();
 
-		// Columns
-		for (final DbColumn col : table.getColumns().values()) {
+		final List<DbColumn> columns = new ArrayList<>(table.getColumns().values());
+		if (sortByColumn) {
+			columns.sort(Comparator.comparing(DbColumn::getColumnName));
+		}
+		for (final DbColumn col : columns) {
 			entries.add("\n    " + columnDefinition(col));
 		}
 
-		// Primary key
 		final List<String> pk = table.getPrimaryKey();
 		if (pk != null && !pk.isEmpty()) {
 			final String pkConstraintName = "pk_" + table.getTableName();
@@ -496,7 +493,6 @@ public class SqlDdlMigrationGenerator {
 					+ " PRIMARY KEY (" + quoteList(pk) + ")");
 		}
 
-		// Unique keys
 		if (table.getUniqueKeys() != null) {
 			for (final Map.Entry<String, List<String>> uq : table.getUniqueKeys().entrySet()) {
 				entries.add("\n    CONSTRAINT " + quote(uq.getKey())
@@ -504,7 +500,6 @@ public class SqlDdlMigrationGenerator {
 			}
 		}
 
-		// Foreign keys
 		if (table.getForeignKeys() != null) {
 			for (final DbForeignKey fk : table.getForeignKeys()) {
 				entries.add("\n    " + inlineForeignKey(fk));
@@ -516,14 +511,12 @@ public class SqlDdlMigrationGenerator {
 
 		statements.add(sb.toString());
 
-		// Table comment
 		if (table.getTableComment() != null) {
 			statements.add("COMMENT ON TABLE " + qualifiedTable
 					+ " IS " + sqlString(table.getTableComment()) + ";");
 		}
 
-		// Column comments
-		for (final DbColumn col : table.getColumns().values()) {
+		for (final DbColumn col : columns) {
 			if (col.getColumnComment() != null) {
 				statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + quote(col.getColumnName())
 						+ " IS " + sqlString(col.getColumnComment()) + ";");
@@ -532,10 +525,6 @@ public class SqlDdlMigrationGenerator {
 
 		return statements;
 	}
-
-	// -------------------------------------------------------------------------
-	// SQL snippet helpers
-	// -------------------------------------------------------------------------
 
 	private static String dropTable(final String schemaName, final String tableName) {
 		return "DROP TABLE IF EXISTS " + qualifiedName(schemaName, tableName) + ";";
@@ -549,7 +538,6 @@ public class SqlDdlMigrationGenerator {
 		if (t != null) {
 			sb.append(sqlTypeName(t));
 			if (t.isAutoIncrement()) {
-				// PostgreSQL: use GENERATED ALWAYS AS IDENTITY; omit for other dialects
 				sb.append(" GENERATED ALWAYS AS IDENTITY");
 			}
 			if (!t.isNullable()) {
@@ -562,10 +550,6 @@ public class SqlDdlMigrationGenerator {
 		return sb.toString();
 	}
 
-	/**
-	 * Renders the SQL type name with size / precision / scale where applicable,
-	 * based on the {@link DbColumnType#getSimpleDataType()} category.
-	 */
 	private static String sqlTypeName(final DbColumnType t) {
 		final DbSimpleDataType simple = t.getSimpleDataType();
 		final String base = t.getTypeName();
@@ -607,10 +591,6 @@ public class SqlDdlMigrationGenerator {
 		return "ALTER TABLE " + qualifiedTable + " ADD " + inlineForeignKey(fk) + ";";
 	}
 
-	// -------------------------------------------------------------------------
-	// Equality helpers
-	// -------------------------------------------------------------------------
-
 	private static boolean typeSignatureEquals(final DbColumnType a, final DbColumnType b) {
 		if (!a.getTypeName().equalsIgnoreCase(b.getTypeName())) {
 			return false;
@@ -634,10 +614,6 @@ public class SqlDdlMigrationGenerator {
 				&& Objects.equals(normalizeList(a.getReferencedColumnNames()),
 						normalizeList(b.getReferencedColumnNames()));
 	}
-
-	// -------------------------------------------------------------------------
-	// Formatting utilities
-	// -------------------------------------------------------------------------
 
 	private static String quote(final String name) {
 		if (name == null) {
@@ -667,11 +643,9 @@ public class SqlDdlMigrationGenerator {
 		return quote(schemaName) + "." + quote(tableName);
 	}
 
-	/** Returns only the table part from a {@code "schema"."table"} string. */
 	private static String unqualifiedName(final String qualifiedTable) {
 		final int dot = qualifiedTable.lastIndexOf('.');
 		final String raw = dot >= 0 ? qualifiedTable.substring(dot + 1) : qualifiedTable;
-		// Strip surrounding quotes
 		return raw.startsWith("\"") && raw.endsWith("\"")
 				? raw.substring(1, raw.length() - 1)
 				: raw;

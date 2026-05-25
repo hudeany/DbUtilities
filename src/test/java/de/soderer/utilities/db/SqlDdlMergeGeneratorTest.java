@@ -19,6 +19,10 @@ import org.junit.jupiter.api.Test;
  * <p>Each test calls {@link SqlDdlMergeGenerator#merge} with two DDL strings
  * and asserts the content of the resulting merged DDL as well as the
  * correctness of the statistics comment block.
+ *
+ * <p>Since statistics lines are only written when their counter is greater than
+ * zero, tests that previously checked for label presence in an empty merge now
+ * verify that no counter lines appear at all for a zero-change run.
  */
 @DisplayName("SqlDdlMergeGenerator")
 class SqlDdlMergeGeneratorTest {
@@ -32,6 +36,15 @@ class SqlDdlMergeGeneratorTest {
 		final InputStream b = stream(ddlB);
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		SqlDdlMergeGenerator.merge(a, b, out);
+		return out.toString(StandardCharsets.UTF_8);
+	}
+
+	private static String mergeWithSort(final String ddlA, final String ddlB,
+			final boolean sortBySchema, final boolean sortByTable, final boolean sortByColumn) throws Exception {
+		final InputStream a = stream(ddlA);
+		final InputStream b = stream(ddlB);
+		final ByteArrayOutputStream out = new ByteArrayOutputStream();
+		SqlDdlMergeGenerator.merge(a, b, out, sortBySchema, sortByTable, sortByColumn);
 		return out.toString(StandardCharsets.UTF_8);
 	}
 
@@ -140,11 +153,12 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: schemasOnlyInA, schemasOnlyInB, schemasMerged")
+		@DisplayName("statistics: schemasOnlyInA and schemasOnlyInB lines present when > 0")
 		void statsSchemas() throws Exception {
 			final String a = "CREATE SCHEMA onlya; CREATE SCHEMA shared;";
 			final String b = "CREATE SCHEMA onlyb; CREATE SCHEMA shared;";
 			final String output = merge(a, b);
+			// All three counters are > 0 in this scenario
 			assertAll(
 					() -> assertContains(output, "only in a"),
 					() -> assertContains(output, "only in b"),
@@ -210,7 +224,7 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: tablesOnlyInA, tablesOnlyInB, tablesMerged")
+		@DisplayName("statistics: tablesOnlyInA and tablesOnlyInB lines present when > 0")
 		void statsTables() throws Exception {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.ta (id INTEGER NOT NULL); CREATE TABLE s.shared (id INTEGER NOT NULL);";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.tb (id INTEGER NOT NULL); CREATE TABLE s.shared (id INTEGER NOT NULL);";
@@ -271,7 +285,7 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: columnsOnlyInA, columnsOnlyInB, columnsBWins")
+		@DisplayName("statistics: columnsOnlyInA, columnsOnlyInB, columnsBWins lines present when > 0")
 		void statsColumns() throws Exception {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, a_col VARCHAR(10), shared VARCHAR(10));";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, b_col VARCHAR(10), shared VARCHAR(20));";
@@ -320,7 +334,7 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: pkFromA, pkFromB, pkBOverridesA")
+		@DisplayName("statistics: pkFromB and pkBOverridesA lines present when > 0")
 		void statsPk() throws Exception {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, CONSTRAINT pk_t PRIMARY KEY (id));";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, code INTEGER NOT NULL, CONSTRAINT pk_t PRIMARY KEY (code));";
@@ -364,7 +378,7 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: uniqueFromA, uniqueFromB, uniqueConflicts")
+		@DisplayName("statistics: uniqueFromB and uniqueConflicts lines present when > 0")
 		void statsUniqueKeys() throws Exception {
 			final String a = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, a VARCHAR(10), CONSTRAINT uq_shared UNIQUE (a));";
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, b VARCHAR(10), CONSTRAINT uq_shared UNIQUE (b));";
@@ -439,7 +453,7 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: fkFromA, fkFromB, fkConflicts")
+		@DisplayName("statistics: fkConflicts line present when > 0")
 		void statsFk() throws Exception {
 			final String a = """
 					CREATE SCHEMA s;
@@ -474,19 +488,6 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("all statistic labels are present")
-		void allLabelsPresent() throws Exception {
-			final String output = merge("", "");
-			assertAll(
-					() -> assertContains(output, "only in a"),
-					() -> assertContains(output, "only in b"),
-					() -> assertContains(output, "in both"),
-					() -> assertContains(output, "b overrides"),
-					() -> assertContains(output, "conflicts")
-			);
-		}
-
-		@Test
 		@DisplayName("statistics appear before DDL statements")
 		void statisticsBeforeDdl() throws Exception {
 			final String b = "CREATE SCHEMA s;";
@@ -497,20 +498,37 @@ class SqlDdlMergeGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("zero-change merge: all counters are 0")
+		@DisplayName("zero-change merge: no counter lines appear in statistics block")
 		void zeroCounters() throws Exception {
 			final String output = merge("", "");
 			final int start = output.indexOf("Merge Statistics");
-			// find the end of the stats block (after the closing separator)
 			final int endSep = output.indexOf("-- =====", start + 20);
 			final int endSep2 = output.indexOf("-- =====", endSep + 10);
 			final String statsBlock = output.substring(start, endSep2 > endSep ? endSep2 : output.length());
+			// No line of the form "--  Something : N" should appear (all counters are 0)
 			for (final String line : statsBlock.split("\n")) {
-				if (line.contains(":")) {
-					assertTrue(line.trim().endsWith(": 0") || line.trim().endsWith(":  0") || !line.trim().startsWith("--  "),
-							"Expected counter to be 0 in line: " + line);
+				if (line.trim().startsWith("--  ") && line.contains(":")) {
+					// This would be a counter line — they must not exist for an empty merge
+					assertTrue(false, "Unexpected counter line in zero-change statistics: " + line);
 				}
 			}
+		}
+
+		@Test
+		@DisplayName("non-zero statistics: counter line appears for active counter")
+		void nonZeroCounterAppears() throws Exception {
+			final String a = "CREATE SCHEMA only_a;";
+			final String output = merge(a, "");
+			assertContains(output, "only in a");
+		}
+
+		@Test
+		@DisplayName("zero counter: label is absent from statistics block")
+		void zeroCounterAbsent() throws Exception {
+			// Only schemasOnlyInA is > 0; schemasOnlyInB should not appear
+			final String a = "CREATE SCHEMA only_a;";
+			final String output = merge(a, "");
+			assertNotContains(output, "only in b");
 		}
 	}
 
@@ -568,6 +586,63 @@ class SqlDdlMergeGeneratorTest {
 			final int posAlpha = output.toLowerCase().indexOf("alpha");
 			final int posBeta  = output.toLowerCase().indexOf("beta");
 			assertTrue(posAlpha < posBeta, "Schema alpha (from A) should appear before beta (from B)");
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Sorting
+	// -------------------------------------------------------------------------
+
+	@Nested
+	@DisplayName("Sorting")
+	class Sorting {
+
+		@Test
+		@DisplayName("sortBySchema: schemas appear in alphabetical order")
+		void sortBySchema() throws Exception {
+			final String a = "CREATE SCHEMA z_schema; CREATE SCHEMA a_schema;";
+			final String output = mergeWithSort(a, "", true, false, false);
+			final int posA = output.toLowerCase().indexOf("a_schema");
+			final int posZ = output.toLowerCase().indexOf("z_schema");
+			assertTrue(posA < posZ, "a_schema should appear before z_schema when sortBySchema is enabled");
+		}
+
+		@Test
+		@DisplayName("sortByTable: tables within a schema appear in alphabetical order")
+		void sortByTable() throws Exception {
+			final String a = """
+					CREATE SCHEMA s;
+					CREATE TABLE s.z_table (id INTEGER NOT NULL);
+					CREATE TABLE s.a_table (id INTEGER NOT NULL);
+					""";
+			final String output = mergeWithSort(a, "", false, true, false);
+			final int posA = output.toLowerCase().indexOf("a_table");
+			final int posZ = output.toLowerCase().indexOf("z_table");
+			assertTrue(posA < posZ, "a_table should appear before z_table when sortByTable is enabled");
+		}
+
+		@Test
+		@DisplayName("sortByColumn: columns within a table appear in alphabetical order")
+		void sortByColumn() throws Exception {
+			final String a = "CREATE SCHEMA s; CREATE TABLE s.t (z_col INTEGER, a_col INTEGER);";
+			final String output = mergeWithSort(a, "", false, false, true);
+			final int posA = output.toLowerCase().indexOf("a_col");
+			final int posZ = output.toLowerCase().indexOf("z_col");
+			assertTrue(posA < posZ, "a_col should appear before z_col when sortByColumn is enabled");
+		}
+
+		@Test
+		@DisplayName("no sorting: original order is preserved")
+		void noSorting() throws Exception {
+			final String a = """
+					CREATE SCHEMA s;
+					CREATE TABLE s.z_table (z_col INTEGER, a_col INTEGER);
+					CREATE TABLE s.a_table (id INTEGER NOT NULL);
+					""";
+			final String output = mergeWithSort(a, "", false, false, false);
+			final int posZTable = output.toLowerCase().indexOf("z_table");
+			final int posATable = output.toLowerCase().indexOf("a_table");
+			assertTrue(posZTable < posATable, "Without sorting, z_table should appear before a_table");
 		}
 	}
 

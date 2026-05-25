@@ -18,6 +18,9 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Statistics assertions search for the exact label strings as written by
  * {@code MigrationStatistics.writeTo()}, e.g. {@code "Schemas  created"}.
+ * Since statistics lines are only written when their counter is greater than
+ * zero, tests now verify that a label is present only when a relevant change
+ * was actually detected, and absent in a zero-change run.
  *
  * <p>Table-level PRIMARY KEY / UNIQUE / FOREIGN KEY constraints are always
  * expressed via separate ALTER TABLE statements to avoid a known parser
@@ -39,6 +42,15 @@ class SqlDdlMigrationGeneratorTest {
 		return out.toString(StandardCharsets.UTF_8);
 	}
 
+	private static String diffWithSort(final String sourceDdl, final String destinationDdl,
+			final boolean sortBySchema, final boolean sortByTable, final boolean sortByColumn) throws Exception {
+		final InputStream src = stream(sourceDdl);
+		final InputStream dst = stream(destinationDdl);
+		final ByteArrayOutputStream out = new ByteArrayOutputStream();
+		SqlDdlMigrationGenerator.diff(src, dst, out, sortBySchema, sortByTable, sortByColumn);
+		return out.toString(StandardCharsets.UTF_8);
+	}
+
 	private static InputStream stream(final String ddl) {
 		return new ByteArrayInputStream(ddl.getBytes(StandardCharsets.UTF_8));
 	}
@@ -57,6 +69,8 @@ class SqlDdlMigrationGeneratorTest {
 	 * Extracts the numeric counter value from a statistics line that contains
 	 * {@code label}. E.g. for label {@code "created"} and line
 	 * {@code "--  Schemas  created  : 3"} this returns 3.
+	 * Throws {@link AssertionError} if the label is not found (i.e. counter was 0
+	 * and the line was omitted).
 	 */
 	private static int statValue(final String output, final String label) {
 		for (final String line : output.split("\n")) {
@@ -70,6 +84,25 @@ class SqlDdlMigrationGeneratorTest {
 			}
 		}
 		throw new AssertionError("Statistics label not found in output: «" + label + "»\n" + output);
+	}
+
+	/**
+	 * Returns {@code true} when a statistics line for {@code label} is present
+	 * in the output (meaning the counter was > 0).
+	 */
+	private static boolean statPresent(final String output, final String label) {
+		for (final String line : output.split("\n")) {
+			if (line.toLowerCase().contains(label.toLowerCase()) && line.contains(":")) {
+				final String after = line.substring(line.lastIndexOf(':') + 1).trim();
+				try {
+					Integer.parseInt(after);
+					return true;
+				} catch (@SuppressWarnings("unused") final NumberFormatException ignored) {
+					// not a numeric counter line
+				}
+			}
+		}
+		return false;
 	}
 
 	// -------------------------------------------------------------------------
@@ -128,24 +161,32 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: Schemas dropped > 0")
+		@DisplayName("statistics: Schemas dropped line present when > 0")
 		void statsDroppedSchema() throws Exception {
 			final String src = """
 					CREATE SCHEMA s1;
 					CREATE TABLE s1.t (id INTEGER NOT NULL);
 					""";
 			final String output = diff(src, "");
-			assertTrue(statValue(output, "Schemas  created") >= 0); // label exists
-			assertTrue(statValue(output, "dropped") > 0,            // at least one dropped
-					"Expected schemas dropped > 0");
+			assertTrue(statPresent(output, "dropped"), "Expected 'dropped' statistics line to be present");
+			assertTrue(statValue(output, "dropped") > 0, "Expected schemas dropped > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Schemas created > 0")
+		@DisplayName("statistics: Schemas created line present when > 0")
 		void statsCreatedSchema() throws Exception {
 			final String output = diff("", "CREATE SCHEMA s2;");
-			assertTrue(statValue(output, "Schemas  created") > 0,
-					"Expected schemas created > 0");
+			assertTrue(statPresent(output, "Schemas  created"), "Expected 'Schemas  created' line to be present");
+			assertTrue(statValue(output, "Schemas  created") > 0, "Expected schemas created > 0");
+		}
+
+		@Test
+		@DisplayName("statistics: Schemas created line absent when no schema created")
+		void statsCreatedSchemaAbsent() throws Exception {
+			final String ddl = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL);";
+			final String output = diff(ddl, ddl);
+			assertFalse(statPresent(output, "Schemas  created"),
+					"Expected 'Schemas  created' statistics line to be absent in zero-change diff");
 		}
 	}
 
@@ -180,24 +221,23 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: Tables created > 0")
+		@DisplayName("statistics: Tables created line present when > 0")
 		void statsTablesCreated() throws Exception {
 			final String src = "CREATE SCHEMA s;";
 			final String dst = "CREATE SCHEMA s; CREATE TABLE s.newt (id INTEGER NOT NULL);";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "Tables   created") > 0,
-					"Expected tables created > 0");
+			assertTrue(statPresent(output, "Tables   created"), "Expected 'Tables   created' line to be present");
+			assertTrue(statValue(output, "Tables   created") > 0, "Expected tables created > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Tables dropped > 0")
+		@DisplayName("statistics: Tables dropped line present when > 0")
 		void statsTablesDropped() throws Exception {
 			final String src = "CREATE SCHEMA s; CREATE TABLE s.old (id INTEGER NOT NULL);";
 			final String dst = "CREATE SCHEMA s;";
 			final String output = diff(src, dst);
-			// "Tables   created" line exists; the "dropped" line follows immediately
-			assertTrue(statValue(output, "Tables   created") >= 0); // label present
-			assertContains(output, "Tables");
+			assertTrue(statPresent(output, "dropped"), "Expected 'dropped' line to be present");
+			assertContains(output, "DROP TABLE");
 		}
 	}
 
@@ -322,7 +362,7 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: Columns added > 0")
+		@DisplayName("statistics: Columns added line present when > 0")
 		void statsColumnsAdded() throws Exception {
 			final String dst = """
 					CREATE SCHEMA s;
@@ -333,21 +373,21 @@ class SqlDdlMigrationGeneratorTest {
 					);
 					""";
 			final String output = diff(BASE, dst);
-			assertTrue(statValue(output, "Columns  added") > 0,
-					"Expected columns added > 0");
+			assertTrue(statPresent(output, "Columns  added"), "Expected 'Columns  added' line to be present");
+			assertTrue(statValue(output, "Columns  added") > 0, "Expected columns added > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Columns dropped > 0")
+		@DisplayName("statistics: Columns dropped line present when > 0")
 		void statsColumnsDropped() throws Exception {
 			final String dst = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL);";
 			final String output = diff(BASE, dst);
-			assertTrue(statValue(output, "Columns  added") >= 0); // label present
+			assertTrue(statPresent(output, "dropped"), "Expected 'dropped' line to be present");
 			assertContains(output, "DROP COLUMN");
 		}
 
 		@Test
-		@DisplayName("statistics: Columns type > 0")
+		@DisplayName("statistics: Columns type line present when > 0")
 		void statsTypeChanged() throws Exception {
 			final String dst = """
 					CREATE SCHEMA s;
@@ -357,12 +397,12 @@ class SqlDdlMigrationGeneratorTest {
 					);
 					""";
 			final String output = diff(BASE, dst);
-			assertTrue(statValue(output, "type     :") > 0,
-					"Expected columns type changed > 0");
+			assertTrue(statPresent(output, "type     :"), "Expected 'type' line to be present");
+			assertTrue(statValue(output, "type     :") > 0, "Expected columns type changed > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Columns nullable > 0")
+		@DisplayName("statistics: Columns nullable line present when > 0")
 		void statsNullChanged() throws Exception {
 			final String dst = """
 					CREATE SCHEMA s;
@@ -372,12 +412,12 @@ class SqlDdlMigrationGeneratorTest {
 					);
 					""";
 			final String output = diff(BASE, dst);
-			assertTrue(statValue(output, "nullable :") > 0,
-					"Expected columns nullable changed > 0");
+			assertTrue(statPresent(output, "nullable :"), "Expected 'nullable' line to be present");
+			assertTrue(statValue(output, "nullable :") > 0, "Expected columns nullable changed > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Columns default > 0")
+		@DisplayName("statistics: Columns default line present when > 0")
 		void statsDefaultChanged() throws Exception {
 			final String dst = """
 					CREATE SCHEMA s;
@@ -387,8 +427,8 @@ class SqlDdlMigrationGeneratorTest {
 					);
 					""";
 			final String output = diff(BASE, dst);
-			assertTrue(statValue(output, "default  :") > 0,
-					"Expected columns default changed > 0");
+			assertTrue(statPresent(output, "default  :"), "Expected 'default' line to be present");
+			assertTrue(statValue(output, "default  :") > 0, "Expected columns default changed > 0");
 		}
 	}
 
@@ -449,7 +489,7 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: PK changed > 0")
+		@DisplayName("statistics: PK changed line present when > 0")
 		void statsPkChanged() throws Exception {
 			final String src = """
 					CREATE SCHEMA s;
@@ -462,8 +502,8 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.t ADD CONSTRAINT pk_t PRIMARY KEY (code);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "PK       changed") > 0,
-					"Expected PK changed > 0");
+			assertTrue(statPresent(output, "PK       changed"), "Expected 'PK       changed' line to be present");
+			assertTrue(statValue(output, "PK       changed") > 0, "Expected PK changed > 0");
 		}
 	}
 
@@ -507,7 +547,7 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: Unique added > 0")
+		@DisplayName("statistics: Unique added line present when > 0")
 		void statsUniqueAdded() throws Exception {
 			final String src = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, email VARCHAR(100));";
 			final String dst = """
@@ -516,12 +556,12 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.t ADD CONSTRAINT uq_email UNIQUE (email);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "Unique   added") > 0,
-					"Expected unique added > 0");
+			assertTrue(statPresent(output, "Unique   added"), "Expected 'Unique   added' line to be present");
+			assertTrue(statValue(output, "Unique   added") > 0, "Expected unique added > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: Unique dropped > 0")
+		@DisplayName("statistics: Unique dropped line present when > 0")
 		void statsUniqueDropped() throws Exception {
 			final String src = """
 					CREATE SCHEMA s;
@@ -530,7 +570,7 @@ class SqlDdlMigrationGeneratorTest {
 					""";
 			final String dst = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, email VARCHAR(100));";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "Unique   added") >= 0); // label present
+			assertTrue(statPresent(output, "dropped"), "Expected 'dropped' line to be present");
 			assertContains(output, "DROP CONSTRAINT");
 		}
 	}
@@ -590,7 +630,7 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: FK added > 0")
+		@DisplayName("statistics: FK added line present when > 0")
 		void statsFkAdded() throws Exception {
 			final String src = """
 					CREATE SCHEMA s;
@@ -604,12 +644,12 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.emp ADD CONSTRAINT fk_new FOREIGN KEY (dept_id) REFERENCES dept (id);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "FK       added") > 0,
-					"Expected FK added > 0");
+			assertTrue(statPresent(output, "FK       added"), "Expected 'FK       added' line to be present");
+			assertTrue(statValue(output, "FK       added") > 0, "Expected FK added > 0");
 		}
 
 		@Test
-		@DisplayName("statistics: FK dropped > 0")
+		@DisplayName("statistics: FK dropped line present when > 0")
 		void statsFkDropped() throws Exception {
 			final String src = """
 					CREATE SCHEMA s;
@@ -623,7 +663,7 @@ class SqlDdlMigrationGeneratorTest {
 					CREATE TABLE s.emp (id INTEGER NOT NULL, dept_id INTEGER);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "FK       added") >= 0); // label present
+			assertTrue(statPresent(output, "dropped"), "Expected 'dropped' line to be present");
 			assertContains(output, "DROP CONSTRAINT");
 		}
 	}
@@ -681,7 +721,7 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("statistics: Comments changed > 0")
+		@DisplayName("statistics: Comments changed line present when > 0")
 		void statsComments() throws Exception {
 			final String src = """
 					CREATE SCHEMA s;
@@ -694,8 +734,8 @@ class SqlDdlMigrationGeneratorTest {
 					COMMENT ON TABLE s.t IS 'New';
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statValue(output, "Comments changed") > 0,
-					"Expected comments changed > 0");
+			assertTrue(statPresent(output, "Comments changed"), "Expected 'Comments changed' line to be present");
+			assertTrue(statValue(output, "Comments changed") > 0, "Expected comments changed > 0");
 		}
 	}
 
@@ -715,25 +755,6 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("all statistic section headers are present in output")
-		void allSectionHeadersPresent() throws Exception {
-			final String output = diff("", "");
-			assertAll(
-					() -> assertContains(output, "Schemas  created"),
-					() -> assertContains(output, "Tables   created"),
-					() -> assertContains(output, "Columns  added"),
-					() -> assertContains(output, "type     :"),
-					() -> assertContains(output, "nullable :"),
-					() -> assertContains(output, "default  :"),
-					() -> assertContains(output, "comment  :"),
-					() -> assertContains(output, "PK       changed"),
-					() -> assertContains(output, "Unique   added"),
-					() -> assertContains(output, "FK       added"),
-					() -> assertContains(output, "Comments changed")
-			);
-		}
-
-		@Test
 		@DisplayName("statistics appear before SQL statements")
 		void statisticsBeforeStatements() throws Exception {
 			final String output = diff("", "CREATE SCHEMA s;");
@@ -743,23 +764,37 @@ class SqlDdlMigrationGeneratorTest {
 		}
 
 		@Test
-		@DisplayName("zero-change run: all counters are 0")
+		@DisplayName("zero-change run: no counter lines appear in statistics block")
 		void zeroCounters() throws Exception {
 			final String ddl = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL);";
 			final String output = diff(ddl, ddl);
-			assertAll(
-					() -> assertTrue(statValue(output, "Schemas  created") == 0),
-					() -> assertTrue(statValue(output, "Tables   created") == 0),
-					() -> assertTrue(statValue(output, "Columns  added")   == 0),
-					() -> assertTrue(statValue(output, "type     :")        == 0),
-					() -> assertTrue(statValue(output, "nullable :")        == 0),
-					() -> assertTrue(statValue(output, "default  :")        == 0),
-					() -> assertTrue(statValue(output, "comment  :")        == 0),
-					() -> assertTrue(statValue(output, "PK       changed") == 0),
-					() -> assertTrue(statValue(output, "Unique   added")   == 0),
-					() -> assertTrue(statValue(output, "FK       added")    == 0),
-					() -> assertTrue(statValue(output, "Comments changed") == 0)
-			);
+			// Extract statistics block
+			final int start   = output.indexOf("Migration Statistics");
+			final int endSep  = output.indexOf("-- =====", start + 20);
+			final int endSep2 = output.indexOf("-- =====", endSep + 10);
+			final String statsBlock = output.substring(start, endSep2 > endSep ? endSep2 : output.length());
+			for (final String line : statsBlock.split("\n")) {
+				if (line.trim().startsWith("--  ") && line.contains(":")) {
+					assertTrue(false, "Unexpected counter line in zero-change statistics: " + line);
+				}
+			}
+		}
+
+		@Test
+		@DisplayName("zero-change run: no structural differences message is present")
+		void zeroChangesMessage() throws Exception {
+			final String ddl = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL);";
+			final String output = diff(ddl, ddl);
+			assertContains(output, "No structural differences detected");
+		}
+
+		@Test
+		@DisplayName("active counter line present; inactive counter line absent")
+		void activeVsInactiveCounter() throws Exception {
+			// Only schemas created → schemas dropped line must not appear
+			final String output = diff("", "CREATE SCHEMA s2;");
+			assertTrue(statPresent(output, "Schemas  created"), "Expected 'Schemas  created' to be present");
+			assertFalse(statPresent(output, "dropped"), "Expected 'dropped' to be absent when nothing was dropped");
 		}
 	}
 
@@ -827,6 +862,73 @@ class SqlDdlMigrationGeneratorTest {
 			final String output = diff(src, dst);
 			assertContains(output, "COMMENT ON SCHEMA");
 			assertContains(output, "New");
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Sorting
+	// -------------------------------------------------------------------------
+
+	@Nested
+	@DisplayName("Sorting")
+	class Sorting {
+
+		@Test
+		@DisplayName("sortBySchema: statements appear in alphabetical schema order")
+		void sortBySchema() throws Exception {
+			// Both schemas are new (only in dst) so CREATE SCHEMA statements are emitted.
+			// Without sorting the generator would emit z_schema first (dst declaration order).
+			final String src = "";
+			final String dst = "CREATE SCHEMA z_schema; CREATE TABLE z_schema.t (id INTEGER NOT NULL); CREATE SCHEMA a_schema; CREATE TABLE a_schema.t (id INTEGER NOT NULL);";
+			final String output = diffWithSort(src, dst, true, false, false);
+			// Find the position of the first DDL statement section (after the statistics block)
+			final int statsEnd = output.indexOf("-- ====", output.indexOf("Migration Statistics") + 1);
+			final String ddlSection = output.substring(statsEnd);
+			final int posA = ddlSection.toLowerCase().indexOf("a_schema");
+			final int posZ = ddlSection.toLowerCase().indexOf("z_schema");
+			assertTrue(posA >= 0 && posZ >= 0, "Both schemas must appear in the DDL section");
+			assertTrue(posA < posZ, "a_schema statements should appear before z_schema when sortBySchema is enabled");
+		}
+
+		@Test
+		@DisplayName("sortByTable: statements appear in alphabetical table order within schema")
+		void sortByTable() throws Exception {
+			final String src = "CREATE SCHEMA s;";
+			final String dst = """
+					CREATE SCHEMA s;
+					CREATE TABLE s.z_table (id INTEGER NOT NULL);
+					CREATE TABLE s.a_table (id INTEGER NOT NULL);
+					""";
+			final String output = diffWithSort(src, dst, false, true, false);
+			final int posA = output.toLowerCase().indexOf("a_table");
+			final int posZ = output.toLowerCase().indexOf("z_table");
+			assertTrue(posA < posZ, "a_table should appear before z_table when sortByTable is enabled");
+		}
+
+		@Test
+		@DisplayName("sortByColumn: column definitions appear in alphabetical order in CREATE TABLE")
+		void sortByColumn() throws Exception {
+			final String src = "CREATE SCHEMA s;";
+			final String dst = "CREATE SCHEMA s; CREATE TABLE s.t (z_col INTEGER, a_col INTEGER);";
+			final String output = diffWithSort(src, dst, false, false, true);
+			final int posA = output.toLowerCase().indexOf("a_col");
+			final int posZ = output.toLowerCase().indexOf("z_col");
+			assertTrue(posA < posZ, "a_col should appear before z_col when sortByColumn is enabled");
+		}
+
+		@Test
+		@DisplayName("no sorting: original destination order is preserved")
+		void noSorting() throws Exception {
+			final String src = "CREATE SCHEMA s;";
+			final String dst = """
+					CREATE SCHEMA s;
+					CREATE TABLE s.z_table (id INTEGER NOT NULL);
+					CREATE TABLE s.a_table (id INTEGER NOT NULL);
+					""";
+			final String output = diffWithSort(src, dst, false, false, false);
+			final int posZ = output.toLowerCase().indexOf("z_table");
+			final int posA = output.toLowerCase().indexOf("a_table");
+			assertTrue(posZ < posA, "Without sorting, z_table should appear before a_table");
 		}
 	}
 }
