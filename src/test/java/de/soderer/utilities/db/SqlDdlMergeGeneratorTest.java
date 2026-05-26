@@ -571,7 +571,7 @@ class SqlDdlMergeGeneratorTest {
 			final String b = "CREATE SCHEMA s; CREATE TABLE s.t (id INTEGER NOT NULL, name VARCHAR(100));";
 			// B wins — VARCHAR(100), and column appears only once
 			final String output = merge(a, b);
-			final int countId = countOccurrences(output.toLowerCase(), "\"id\"");
+			final int countId = countOccurrences(output.toLowerCase(), "id integer");
 			assertTrue(countId == 1, "Column id should appear exactly once, found: " + countId);
 			assertContains(output, "VARCHAR(100)");
 			assertNotContains(output, "VARCHAR(50)");
