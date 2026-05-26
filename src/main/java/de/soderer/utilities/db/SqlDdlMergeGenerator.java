@@ -18,6 +18,7 @@ import de.soderer.utilities.db.data.DbSchema;
 import de.soderer.utilities.db.data.DbSimpleDataType;
 import de.soderer.utilities.db.data.DbStructure;
 import de.soderer.utilities.db.data.DbTable;
+import de.soderer.utilities.db.data.DbVendor;
 import de.soderer.utilities.db.exception.DbStructureException;
 
 /**
@@ -526,17 +527,7 @@ public class SqlDdlMergeGenerator {
 	}
 
 	private static String quote(final String name) {
-		final boolean needsQuoteForSyntax = !DbUtilities.SAFE_IDENTIFIER.matcher(name).matches();
-
-		if (name == null) {
-			return "\"\"";
-		} else if (needsQuoteForSyntax) {
-			return "\"" + name.replace("\"", "\"\"") + "\"";
-		} else if (DbUtilities.RESERVED_WORDS_POSTGRESQL.contains(name.toLowerCase())) {
-			return "\"" + name.replace("\"", "\"\"") + "\"";
-		} else {
-			return name;
-		}
+		return DbUtilities.escapeVendorReservedNames(DbVendor.PostgreSQL, name);
 	}
 
 	private static String quoteList(final List<String> names) {

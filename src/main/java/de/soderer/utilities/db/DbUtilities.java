@@ -3256,39 +3256,41 @@ public class DbUtilities {
 	}
 
 	public static String escapeVendorReservedNames(final DbVendor dbVendor, final String value) {
-		final boolean needsQuoteForSyntax = !DbUtilities.SAFE_IDENTIFIER.matcher(value).matches();
-
 		if (Utilities.isBlank(value)) {
 			return value;
-		} else if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
-			if (needsQuoteForSyntax || RESERVED_WORDS_MYSSQL_MARIADB.contains(value.toLowerCase())) {
-				return "`" + value + "`";
-			} else {
-				return value;
-			}
-		} else if (dbVendor == DbVendor.PostgreSQL) {
-			if (needsQuoteForSyntax || RESERVED_WORDS_POSTGRESQL.contains(value.toLowerCase())) {
-				return "\"" + value + "\"";
-			} else {
-				return value;
-			}
-		} else if (dbVendor == DbVendor.Oracle) {
-			if (needsQuoteForSyntax || RESERVED_WORDS_ORACLE.contains(value.toLowerCase())) {
-				return "\"" + value.toUpperCase() + "\"";
-			} else {
-				return value;
-			}
-		} else if (dbVendor == DbVendor.Derby) {
-			if (needsQuoteForSyntax || RESERVED_WORDS_DERBY.contains(value.toLowerCase())) {
-				return "\"" + value + "\"";
-			} else {
-				return value;
-			}
 		} else {
-			if (needsQuoteForSyntax) {
-				return "\"" + value + "\"";
+			final boolean needsQuoteForSyntax = !DbUtilities.SAFE_IDENTIFIER.matcher(value).matches();
+
+			if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
+				if (needsQuoteForSyntax || RESERVED_WORDS_MYSSQL_MARIADB.contains(value.toLowerCase())) {
+					return "`" + value.replaceAll("`", "``") + "`";
+				} else {
+					return value;
+				}
+			} else if (dbVendor == DbVendor.PostgreSQL) {
+				if (needsQuoteForSyntax || RESERVED_WORDS_POSTGRESQL.contains(value.toLowerCase())) {
+					return "\"" + value.replace("\"", "\"\"") + "\"";
+				} else {
+					return value;
+				}
+			} else if (dbVendor == DbVendor.Oracle) {
+				if (needsQuoteForSyntax || RESERVED_WORDS_ORACLE.contains(value.toLowerCase())) {
+					return "\"" + value.toUpperCase().replace("\"", "\"\"") + "\"";
+				} else {
+					return value;
+				}
+			} else if (dbVendor == DbVendor.Derby) {
+				if (needsQuoteForSyntax || RESERVED_WORDS_DERBY.contains(value.toLowerCase())) {
+					return "\"" + value.replace("\"", "\"\"") + "\"";
+				} else {
+					return value;
+				}
 			} else {
-				return value;
+				if (needsQuoteForSyntax) {
+					return "\"" + value.replace("\"", "\"\"") + "\"";
+				} else {
+					return value;
+				}
 			}
 		}
 	}
