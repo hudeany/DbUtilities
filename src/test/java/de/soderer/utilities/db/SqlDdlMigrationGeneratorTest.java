@@ -176,8 +176,9 @@ class SqlDdlMigrationGeneratorTest {
 		@DisplayName("statistics: Schemas created line present when > 0")
 		void statsCreatedSchema() throws Exception {
 			final String output = diff("", "CREATE SCHEMA s2;");
-			assertTrue(statPresent(output, "Schemas  created"), "Expected 'Schemas  created' line to be present");
-			assertTrue(statValue(output, "Schemas  created") > 0, "Expected schemas created > 0");
+			assertTrue(output.contains("-- Schemas"), "Expected 'Schemas' line to be present");
+			assertTrue(statPresent(output, "         created"), "Expected 'created' line to be present");
+			assertTrue(statValue(output, "         created") > 0, "Expected schemas created > 0");
 		}
 
 		@Test
@@ -226,8 +227,9 @@ class SqlDdlMigrationGeneratorTest {
 			final String src = "CREATE SCHEMA s;";
 			final String dst = "CREATE SCHEMA s; CREATE TABLE s.newt (id INTEGER NOT NULL);";
 			final String output = diff(src, dst);
-			assertTrue(statPresent(output, "Tables   created"), "Expected 'Tables   created' line to be present");
-			assertTrue(statValue(output, "Tables   created") > 0, "Expected tables created > 0");
+			assertTrue(output.contains("-- Tables"), "Expected 'Tables' line to be present");
+			assertTrue(statPresent(output, "         created"), "Expected 'created' line to be present");
+			assertTrue(statValue(output, "         created") > 0, "Expected tables created > 0");
 		}
 
 		@Test
@@ -373,8 +375,9 @@ class SqlDdlMigrationGeneratorTest {
 					);
 					""";
 			final String output = diff(BASE, dst);
-			assertTrue(statPresent(output, "Columns  added"), "Expected 'Columns  added' line to be present");
-			assertTrue(statValue(output, "Columns  added") > 0, "Expected columns added > 0");
+			assertTrue(output.contains("-- Columns"), "Expected 'Columns' line to be present");
+			assertTrue(statPresent(output, "         added"), "Expected 'added' line to be present");
+			assertTrue(statValue(output, "         added") > 0, "Expected columns added > 0");
 		}
 
 		@Test
@@ -502,8 +505,9 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.t ADD CONSTRAINT pk_t PRIMARY KEY (code);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statPresent(output, "PK       changed"), "Expected 'PK       changed' line to be present");
-			assertTrue(statValue(output, "PK       changed") > 0, "Expected PK changed > 0");
+			assertTrue(output.contains("-- PK"), "Expected 'PK' line to be present");
+			assertTrue(statPresent(output, "         changed"), "Expected 'changed' line to be present");
+			assertTrue(statValue(output, "         changed") > 0, "Expected PK changed > 0");
 		}
 	}
 
@@ -556,8 +560,9 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.t ADD CONSTRAINT uq_email UNIQUE (email);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statPresent(output, "Unique   added"), "Expected 'Unique   added' line to be present");
-			assertTrue(statValue(output, "Unique   added") > 0, "Expected unique added > 0");
+			assertTrue(output.contains("-- Unique"), "Expected 'Unique' line to be present");
+			assertTrue(statPresent(output, "         added"), "Expected 'added' line to be present");
+			assertTrue(statValue(output, "         added") > 0, "Expected unique added > 0");
 		}
 
 		@Test
@@ -644,8 +649,9 @@ class SqlDdlMigrationGeneratorTest {
 					ALTER TABLE s.emp ADD CONSTRAINT fk_new FOREIGN KEY (dept_id) REFERENCES dept (id);
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statPresent(output, "FK       added"), "Expected 'FK       added' line to be present");
-			assertTrue(statValue(output, "FK       added") > 0, "Expected FK added > 0");
+			assertTrue(output.contains("-- FK"), "Expected 'FK' line to be present");
+			assertTrue(statPresent(output, "         added"), "Expected 'added' line to be present");
+			assertTrue(statValue(output, "         added") > 0, "Expected FK added > 0");
 		}
 
 		@Test
@@ -734,8 +740,9 @@ class SqlDdlMigrationGeneratorTest {
 					COMMENT ON TABLE s.t IS 'New';
 					""";
 			final String output = diff(src, dst);
-			assertTrue(statPresent(output, "Comments changed"), "Expected 'Comments changed' line to be present");
-			assertTrue(statValue(output, "Comments changed") > 0, "Expected comments changed > 0");
+			assertTrue(output.contains("-- Comments"), "Expected 'Comments' line to be present");
+			assertTrue(statPresent(output, "         changed"), "Expected 'changed' line to be present");
+			assertTrue(statValue(output, "         changed") > 0, "Expected comments changed > 0");
 		}
 	}
 
@@ -793,7 +800,8 @@ class SqlDdlMigrationGeneratorTest {
 		void activeVsInactiveCounter() throws Exception {
 			// Only schemas created → schemas dropped line must not appear
 			final String output = diff("", "CREATE SCHEMA s2;");
-			assertTrue(statPresent(output, "Schemas  created"), "Expected 'Schemas  created' to be present");
+			assertTrue(output.contains("-- Schemas"), "Expected 'Schemas' to be present");
+			assertTrue(statPresent(output, "         created"), "Expected 'created' to be present");
 			assertFalse(statPresent(output, "dropped"), "Expected 'dropped' to be absent when nothing was dropped");
 		}
 	}
