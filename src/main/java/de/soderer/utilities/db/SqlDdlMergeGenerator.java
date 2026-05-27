@@ -80,45 +80,104 @@ public class SqlDdlMergeGenerator {
 		int commentsFromB       = 0;
 		int commentsBOverrideA  = 0; // both defined, B wins
 
-		private static void writeLine(final PrintWriter writer, final String label, final int value) {
-			if (value > 0) {
-				writer.println("--  " + label + value);
-			}
-		}
-
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
 			writer.println("-- Merge Statistics");
 			writer.println("-- ============================================================");
-			writer.println("--");
-			writeLine(writer, "Schemas  only in A (taken over)  : ", schemasOnlyInA);
-			writeLine(writer, "         only in B (taken over)  : ", schemasOnlyInB);
-			writeLine(writer, "         in both  (merged)       : ", schemasMerged);
-			writer.println("--");
-			writeLine(writer, "Tables   only in A (taken over)  : ", tablesOnlyInA);
-			writeLine(writer, "         only in B (taken over)  : ", tablesOnlyInB);
-			writeLine(writer, "         in both  (merged)       : ", tablesMerged);
-			writer.println("--");
-			writeLine(writer, "Columns  only in A (taken over)  : ", columnsOnlyInA);
-			writeLine(writer, "         only in B (taken over)  : ", columnsOnlyInB);
-			writeLine(writer, "         in both  - A kept       : ", columnsAWins);
-			writeLine(writer, "         in both  - B overrides  : ", columnsBWins);
-			writer.println("--");
-			writeLine(writer, "PK       from A                  : ", pkFromA);
-			writeLine(writer, "         from B                  : ", pkFromB);
-			writeLine(writer, "         B overrides A           : ", pkBOverridesA);
-			writer.println("--");
-			writeLine(writer, "Unique   from A                  : ", uniqueFromA);
-			writeLine(writer, "         from B                  : ", uniqueFromB);
-			writeLine(writer, "         conflicts (B wins)      : ", uniqueConflicts);
-			writer.println("--");
-			writeLine(writer, "FK       from A                  : ", fkFromA);
-			writeLine(writer, "         from B                  : ", fkFromB);
-			writeLine(writer, "         conflicts (B wins)      : ", fkConflicts);
-			writer.println("--");
-			writeLine(writer, "Comments from A                  : ", commentsFromA);
-			writeLine(writer, "         from B                  : ", commentsFromB);
-			writeLine(writer, "         B overrides A           : ", commentsBOverrideA);
+			if (schemasOnlyInA > 0 || schemasOnlyInB > 0 || schemasMerged > 0) {
+				writer.println("--");
+				writer.println("-- Schemas");
+				if (schemasOnlyInA > 0) {
+					writer.println("--          only in A (taken over)  : " + schemasOnlyInA);
+				}
+				if (schemasOnlyInB > 0) {
+					writer.println("--          only in B (taken over)  : " + schemasOnlyInB);
+				}
+				if (schemasMerged > 0) {
+					writer.println("--          in both  (merged)       : " + schemasMerged);
+				}
+			}
+			if (tablesOnlyInA > 0 || tablesOnlyInB > 0 || tablesMerged > 0) {
+				writer.println("--");
+				writer.println("-- Tables");
+				if (tablesOnlyInA > 0) {
+					writer.println("--          only in A (taken over)  : " + tablesOnlyInA);
+				}
+				if (tablesOnlyInB > 0) {
+					writer.println("--          only in B (taken over)  : " + tablesOnlyInB);
+				}
+				if (tablesMerged > 0) {
+					writer.println("--          in both  (merged)       : " + tablesMerged);
+				}
+			}
+			if (columnsOnlyInA > 0 || columnsOnlyInB > 0 || columnsAWins > 0 || columnsBWins > 0) {
+				writer.println("--");
+				writer.println("-- Columns");
+				if (columnsOnlyInA > 0) {
+					writer.println("--          only in A (taken over)  : " + columnsOnlyInA);
+				}
+				if (columnsOnlyInB > 0) {
+					writer.println("--          only in B (taken over)  : " + columnsOnlyInB);
+				}
+				if (columnsAWins > 0) {
+					writer.println("--          in both  - A kept       : " + columnsAWins);
+				}
+				if (columnsBWins > 0) {
+					writer.println("--          in both  - B overrides  : " + columnsBWins);
+				}
+			}
+			if (pkFromA > 0 || pkFromB > 0 || pkBOverridesA > 0) {
+				writer.println("--");
+				writer.println("-- PK");
+				if (pkFromA > 0) {
+					writer.println("--          from A                  : " + pkFromA);
+				}
+				if (pkFromB > 0) {
+					writer.println("--          from B                  : " + pkFromB);
+				}
+				if (pkBOverridesA > 0) {
+					writer.println("--          B overrides A           : " + pkBOverridesA);
+				}
+			}
+			if (uniqueFromA > 0 || uniqueFromB > 0 || uniqueConflicts > 0) {
+				writer.println("--");
+				writer.println("-- Unique");
+				if (uniqueFromA > 0) {
+					writer.println("--          from A                  : " + uniqueFromA);
+				}
+				if (uniqueFromB > 0) {
+					writer.println("--          from B                  : " + uniqueFromB);
+				}
+				if (uniqueConflicts > 0) {
+					writer.println("--          conflicts (B wins)      : " + uniqueConflicts);
+				}
+			}
+			if (fkFromA > 0 || fkFromB > 0 || fkConflicts > 0) {
+				writer.println("--");
+				writer.println("-- FK");
+				if (fkFromA > 0) {
+					writer.println("--          from A                  : " + fkFromA);
+				}
+				if (fkFromB > 0) {
+					writer.println("--          from B                  : " + fkFromB);
+				}
+				if (fkConflicts > 0) {
+					writer.println("--          conflicts (B wins)      : " + fkConflicts);
+				}
+			}
+			if (commentsFromA > 0 || commentsFromB > 0 || commentsBOverrideA > 0) {
+				writer.println("--");
+				writer.println("-- Comments");
+				if (commentsFromA > 0) {
+					writer.println("--          from A                  : " + commentsFromA);
+				}
+				if (commentsFromB > 0) {
+					writer.println("--          from B                  : " + commentsFromB);
+				}
+				if (commentsBOverrideA > 0) {
+					writer.println("--          B overrides A           : " + commentsBOverrideA);
+				}
+			}
 			writer.println("-- ============================================================");
 			writer.println();
 		}
@@ -127,8 +186,7 @@ public class SqlDdlMergeGenerator {
 	/**
 	 * Convenience overload without sorting.
 	 */
-	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB,
-			final OutputStream mergeSqlData) throws IOException, DbStructureException {
+	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB, final OutputStream mergeSqlData) throws IOException, DbStructureException {
 		merge(structureSqlDataA, structureSqlDataB, mergeSqlData, false, false, false);
 	}
 

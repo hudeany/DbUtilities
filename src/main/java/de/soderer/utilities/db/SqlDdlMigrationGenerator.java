@@ -65,39 +65,86 @@ public class SqlDdlMigrationGenerator {
 		int foreignKeysDropped      = 0;
 		int commentsChanged         = 0; // table / schema comments
 
-		private static void writeLine(final PrintWriter writer, final String label, final int value) {
-			if (value > 0) {
-				writer.println("--  " + label + value);
-			}
-		}
-
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
 			writer.println("-- Migration Statistics");
 			writer.println("-- ============================================================");
-			writer.println("--");
-			writeLine(writer, "Schemas  created  : ", schemasCreated);
-			writeLine(writer, "         dropped  : ", schemasDropped);
-			writer.println("--");
-			writeLine(writer, "Tables   created  : ", tablesCreated);
-			writeLine(writer, "         dropped  : ", tablesDropped);
-			writer.println("--");
-			writeLine(writer, "Columns  added    : ", columnsAdded);
-			writeLine(writer, "         dropped  : ", columnsDropped);
-			writeLine(writer, "         type     : ", columnsTypeChanged);
-			writeLine(writer, "         nullable : ", columnsNullChanged);
-			writeLine(writer, "         default  : ", columnsDefaultChanged);
-			writeLine(writer, "         comment  : ", columnsCommentChanged);
-			writer.println("--");
-			writeLine(writer, "PK       changed  : ", primaryKeysChanged);
-			writer.println("--");
-			writeLine(writer, "Unique   added    : ", uniqueKeysAdded);
-			writeLine(writer, "         dropped  : ", uniqueKeysDropped);
-			writer.println("--");
-			writeLine(writer, "FK       added    : ", foreignKeysAdded);
-			writeLine(writer, "         dropped  : ", foreignKeysDropped);
-			writer.println("--");
-			writeLine(writer, "Comments changed  : ", commentsChanged);
+			if (schemasCreated > 0 || schemasDropped > 0) {
+				writer.println("--");
+				writer.println("-- Schemas");
+				if (schemasCreated > 0) {
+					writer.println("--          created  : " + schemasCreated);
+				}
+				if (schemasDropped > 0) {
+					writer.println("--          dropped  : " + schemasDropped);
+				}
+			}
+			if (tablesCreated > 0 || tablesDropped > 0) {
+				writer.println("--");
+				writer.println("-- Tables");
+				if (tablesCreated > 0) {
+					writer.println("--          created  : " + tablesCreated);
+				}
+				if (tablesDropped > 0) {
+					writer.println("--          dropped  : " + tablesDropped);
+				}
+			}
+			if (columnsAdded > 0 || columnsDropped > 0 || columnsTypeChanged > 0 || columnsNullChanged > 0 || columnsDefaultChanged > 0 || columnsCommentChanged > 0) {
+				writer.println("--");
+				writer.println("-- Columns");
+				if (columnsAdded > 0) {
+					writer.println("--          added    : " + columnsAdded);
+				}
+				if (columnsDropped > 0) {
+					writer.println("--          dropped  : " + columnsDropped);
+				}
+				if (columnsTypeChanged > 0) {
+					writer.println("--          type     : " + columnsTypeChanged);
+				}
+				if (columnsNullChanged > 0) {
+					writer.println("--          nullable : " + columnsNullChanged);
+				}
+				if (columnsDefaultChanged > 0) {
+					writer.println("--          default  : " + columnsDefaultChanged);
+				}
+				if (columnsCommentChanged > 0) {
+					writer.println("--          comment  : " + columnsCommentChanged);
+				}
+			}
+			if (primaryKeysChanged > 0) {
+				writer.println("--");
+				writer.println("-- PK");
+				if (primaryKeysChanged > 0) {
+					writer.println("--          changed  : " + primaryKeysChanged);
+				}
+			}
+			if (uniqueKeysAdded > 0 || uniqueKeysDropped > 0) {
+				writer.println("--");
+				writer.println("-- Unique");
+				if (uniqueKeysAdded > 0) {
+					writer.println("--          added    : " + uniqueKeysAdded);
+				}
+				if (uniqueKeysDropped > 0) {
+					writer.println("--          dropped  : " + uniqueKeysDropped);
+				}
+			}
+			if (foreignKeysAdded > 0 || foreignKeysDropped > 0) {
+				writer.println("--");
+				writer.println("-- FK");
+				if (foreignKeysAdded > 0) {
+					writer.println("--          added    : " + foreignKeysAdded);
+				}
+				if (foreignKeysDropped > 0) {
+					writer.println("--          dropped  : " + foreignKeysDropped);
+				}
+			}
+			if (commentsChanged > 0) {
+				writer.println("--");
+				writer.println("-- Comments");
+				if (commentsChanged > 0) {
+					writer.println("--          changed  : " + commentsChanged);
+				}
+			}
 			writer.println("-- ============================================================");
 			writer.println();
 		}
