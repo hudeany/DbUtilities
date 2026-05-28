@@ -948,7 +948,7 @@ public class SqlDdlParser {
 	 * Splits a SQL text into individual statements on {@code ;}, respecting
 	 * parenthesis depth (so function bodies with {@code ;} inside are not split).
 	 */
-	static List<String> splitStatements(final String sql) {
+	private static List<String> splitStatements(final String sql) {
 		final List<String> stmts = new ArrayList<>();
 		final StringBuilder buf = new StringBuilder();
 		int depth = 0;
@@ -1033,7 +1033,7 @@ public class SqlDdlParser {
 	 * </ul>
 	 * String literals are left intact.
 	 */
-	static String stripComments(final String sql) {
+	private static String stripComments(final String sql) {
 		final StringBuilder out = new StringBuilder(sql.length());
 		int i = 0;
 		final int len = sql.length();
