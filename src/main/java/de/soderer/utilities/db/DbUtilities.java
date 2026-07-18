@@ -2943,7 +2943,23 @@ public class DbUtilities {
 						} else if (columnDataType.getValue().getSimpleDataType() == DbSimpleDataType.Float) {
 							typeString += "(" + (Integer.toString(columnDataType.getValue().getNumericPrecision())) + ")";
 						}
-						statement.execute("ALTER TABLE " + destinationTableName + " MODIFY " + columnDataType.getKey() + " " + typeString + " NULL");
+
+						if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB || dbVendor == DbVendor.Oracle) {
+							statement.execute("ALTER TABLE " + destinationTableName + " MODIFY " + columnDataType.getKey() + " " + typeString + " NULL");
+						} else if (dbVendor == DbVendor.PostgreSQL) {
+							statement.execute("ALTER TABLE " + destinationTableName + " ALTER COLUMN " + columnDataType.getKey() + " DROP NOT NULL");
+						} else if (dbVendor == DbVendor.MsSQL) {
+							statement.execute("ALTER TABLE " + destinationTableName + " ALTER COLUMN " + columnDataType.getKey() + " " + typeString + " NULL");
+						} else if (dbVendor == DbVendor.HSQL || dbVendor == DbVendor.Derby) {
+							statement.execute("ALTER TABLE " + destinationTableName + " ALTER COLUMN " + columnDataType.getKey() + " NULL");
+						} else if (dbVendor == DbVendor.SQLite) {
+							// SQLite's CREATE TABLE ... AS SELECT never carries over NOT NULL constraints from the source table,
+							// so this should be unreachable for SQLite. SQLite also has no ALTER COLUMN/MODIFY statement at all,
+							// so if this is ever reached, fail clearly instead of throwing a cryptic SQL syntax error.
+							throw new Exception("Cannot make column '" + columnDataType.getKey() + "' nullable in SQLite table '" + destinationTableName + "': SQLite does not support altering column nullability");
+						} else {
+							statement.execute("ALTER TABLE " + destinationTableName + " MODIFY " + columnDataType.getKey() + " " + typeString + " NULL");
+						}
 					}
 				}
 			}
