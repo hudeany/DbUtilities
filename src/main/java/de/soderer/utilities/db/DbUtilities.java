@@ -517,23 +517,25 @@ public class DbUtilities {
 						throw new DbNotExistsException("HSQL database '" + dbName + "' is not available");
 					}
 				}
-				int port;
-				final String[] hostParts = hostnameAndPort.split(":");
-				if (hostParts.length == 2) {
-					try {
-						port = Integer.parseInt(hostParts[1]);
-					} catch (@SuppressWarnings("unused") final Exception e) {
-						throw new Exception("Invalid port: " + hostParts[1]);
+				int port = dbVendor.getDefaultPort();
+				String host = "";
+				if (Utilities.isNotBlank(hostnameAndPort)) {
+					final String[] hostParts = hostnameAndPort.split(":");
+					if (hostParts.length == 2) {
+						try {
+							port = Integer.parseInt(hostParts[1]);
+						} catch (@SuppressWarnings("unused") final Exception e) {
+							throw new Exception("Invalid port: " + hostParts[1]);
+						}
 					}
-				} else {
-					port = dbVendor.getDefaultPort();
+					host = hostParts[0];
 				}
 
 				// Logger must be kept in a local variable for making it work
 				final Logger dbLogger = Logger.getLogger("hsqldb.db");
 				dbLogger.setLevel(Level.WARNING);
 
-				connection = DriverManager.getConnection(generateUrlConnectionString(dbVendor, hostParts[0], port, dbName, false, null, null, null), (Utilities.isNotEmpty(userName) ? userName : "SA"), (password != null ? new String(password) : ""));
+				connection = DriverManager.getConnection(generateUrlConnectionString(dbVendor, host, port, dbName, false, null, null, null), (Utilities.isNotEmpty(userName) ? userName : "SA"), (password != null ? new String(password) : ""));
 			} else {
 				int port;
 				final String[] hostParts = hostnameAndPort.split(":");
@@ -1316,7 +1318,9 @@ public class DbUtilities {
 					}
 				}
 			} else if (DbVendor.MsSQL == dbVendor) {
-				final String sql = "SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable, column_default FROM information_schema.columns WHERE LOWER(table_name) = LOWER(?)";
+				final String sql = "SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable,"
+						+ " COLUMNPROPERTY(OBJECT_ID(table_schema + '.' + table_name), column_name, 'IsIdentity') AS is_identity"
+						+ " FROM information_schema.columns WHERE LOWER(table_name) = LOWER(?)";
 				try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setNString(1, tableName);
@@ -1336,11 +1340,7 @@ public class DbUtilities {
 							}
 							final boolean isNullable = "yes".equalsIgnoreCase(resultSet.getString("is_nullable"));
 
-							final String defaultValue = resultSet.getString("column_default");
-							boolean isAutoIncrement = false;
-							if (defaultValue != null && defaultValue.toLowerCase().startsWith("nextval(")) {
-								isAutoIncrement = true;
-							}
+							final boolean isAutoIncrement = resultSet.getInt("is_identity") == 1;
 
 							returnMap.put(resultSet.getString("column_name"), new DbColumnType(resultSet.getString("data_type"), characterLength, numericPrecision, numericScale, isNullable, isAutoIncrement, null));
 						}
@@ -2812,6 +2812,41 @@ public class DbUtilities {
 				}
 			} else if (dbVendor == DbVendor.Cassandra) {
 				statement.execute("UPDATE " + tableName + " SET " + indexColumnName + " = " + getPrimaryKeyColumns(connection, tableName).iterator().next());
+			} else if (dbVendor == DbVendor.Firebird) {
+				String autoIncrementColumn = null;
+				final List<String> columnsWithoutAutoIncrement = new ArrayList<>();
+				for (final Entry<String, DbColumnType> column : getColumnDataTypes(connection, tableName).entrySet()) {
+					if (!column.getValue().isAutoIncrement()) {
+						columnsWithoutAutoIncrement.add(column.getKey());
+					} else {
+						autoIncrementColumn = column.getKey();
+					}
+				}
+				columnsWithoutAutoIncrement.remove(indexColumnName);
+				if (autoIncrementColumn != null) {
+					statement.executeUpdate("UPDATE " + tableName + " SET " + indexColumnName + " = " + autoIncrementColumn);
+				} else {
+					statement.executeUpdate("INSERT INTO " + tableName + " (" + joinColumnVendorEscaped(dbVendor, columnsWithoutAutoIncrement) + ", " + indexColumnName + ") (SELECT " + joinColumnVendorEscaped(dbVendor, columnsWithoutAutoIncrement) + ", ROW_NUMBER() OVER() FROM " + tableName + ")");
+					statement.executeUpdate("DELETE FROM " + tableName + " WHERE " + indexColumnName + " IS NULL");
+				}
+			} else if (dbVendor == DbVendor.MsSQL) {
+				String autoIncrementColumn = null;
+				final List<String> columnsWithoutAutoIncrement = new ArrayList<>();
+				for (final Entry<String, DbColumnType> column : getColumnDataTypes(connection, tableName).entrySet()) {
+					if (!column.getValue().isAutoIncrement()) {
+						columnsWithoutAutoIncrement.add(column.getKey());
+					} else {
+						autoIncrementColumn = column.getKey();
+					}
+				}
+				columnsWithoutAutoIncrement.remove(indexColumnName);
+				if (autoIncrementColumn != null) {
+					statement.executeUpdate("UPDATE " + tableName + " SET " + indexColumnName + " = " + autoIncrementColumn);
+				} else {
+					// MsSQL requires an explicit ORDER BY within OVER(), unlike PostgreSQL/Derby/Firebird
+					statement.executeUpdate("INSERT INTO " + tableName + " (" + joinColumnVendorEscaped(dbVendor, columnsWithoutAutoIncrement) + ", " + indexColumnName + ") (SELECT " + joinColumnVendorEscaped(dbVendor, columnsWithoutAutoIncrement) + ", ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) FROM " + tableName + ")");
+					statement.executeUpdate("DELETE FROM " + tableName + " WHERE " + indexColumnName + " IS NULL");
+				}
 			} else {
 				throw new Exception("Unsupported database vendor");
 			}
@@ -2839,7 +2874,7 @@ public class DbUtilities {
 						}
 					}
 
-					createTableStatement = createTableStatement.replaceAll(", " + columnName + " [a-zA-Z0-9()]+\\)", ")").replaceAll(", " + columnName + " [a-zA-Z0-9()]+,", ",");
+					createTableStatement = createTableStatement.replaceAll(", " + columnName + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?\\)", ")").replaceAll(", " + columnName + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?,", ",");
 
 					statement.execute("ALTER TABLE " + tableName + " RENAME TO tmp" + randomSuffix + "_old");
 					statement.execute(createTableStatement);
