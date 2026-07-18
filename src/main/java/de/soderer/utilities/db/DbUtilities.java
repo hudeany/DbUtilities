@@ -2638,7 +2638,7 @@ public class DbUtilities {
 	}
 
 	public static int dropDuplicatesCrossTable(final Connection connection, final String keepInTableName, final String deleteInTableName, final List<String> keyColumnsWithFunctions) throws Exception {
-		if (Utilities.isEmpty(keyColumnsWithFunctions)) {
+		if (Utilities.isNotEmpty(keyColumnsWithFunctions)) {
 			final DbVendor dbVendor = getDbVendor(connection);
 			try (Statement statement = connection.createStatement()) {
 				final String deleteDuplicates = "DELETE FROM " + deleteInTableName + " WHERE " + joinColumnVendorEscaped(dbVendor, keyColumnsWithFunctions) + " IN (SELECT " + joinColumnVendorEscaped(dbVendor, keyColumnsWithFunctions) + " FROM " + keepInTableName + ")";
@@ -3632,9 +3632,9 @@ public class DbUtilities {
 		} else if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
 			try (Statement statement = connection.createStatement()) {
 				if (activated) {
-					statement.execute("SET global FOREIGN_KEY_CHECKS = 1");
+					statement.execute("SET FOREIGN_KEY_CHECKS = 1");
 				} else {
-					statement.execute("SET global FOREIGN_KEY_CHECKS = 0");
+					statement.execute("SET FOREIGN_KEY_CHECKS = 0");
 				}
 			}
 		} else {
