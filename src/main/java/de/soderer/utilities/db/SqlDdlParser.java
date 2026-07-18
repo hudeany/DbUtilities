@@ -17,6 +17,7 @@ import de.soderer.utilities.db.data.DbColumn;
 import de.soderer.utilities.db.data.DbColumnType;
 import de.soderer.utilities.db.data.DbForeignKey;
 import de.soderer.utilities.db.data.DbSchema;
+import de.soderer.utilities.db.data.DbSimpleDataType;
 import de.soderer.utilities.db.data.DbStructure;
 import de.soderer.utilities.db.data.DbTable;
 import de.soderer.utilities.db.exception.DbStructureException;
@@ -712,9 +713,21 @@ public class SqlDdlParser {
 		}
 
 		final String typeName = m.group(1);
-		final long charByteSize = m.group(2) != null ? Long.parseLong(m.group(2)) : 0;
-		final int numericPrecision = m.group(2) != null ? Integer.parseInt(m.group(2)) : 0;
-		final int numericScale = m.group(3) != null ? Integer.parseInt(m.group(3)) : 0;
+
+		// Determine the type category from the type name alone (character sizes/
+		// numeric precision have no influence on this), then assign the captured
+		// number(s) only to the field that is actually meaningful for that category.
+		final DbSimpleDataType simple = new DbColumnType(typeName, 0, 0, 0, true, false, null).getSimpleDataType();
+
+		long charByteSize = 0;
+		int numericPrecision = 0;
+		int numericScale = 0;
+		if (simple == DbSimpleDataType.String) {
+			charByteSize = m.group(2) != null ? Long.parseLong(m.group(2)) : 0;
+		} else if (simple == DbSimpleDataType.Float) {
+			numericPrecision = m.group(2) != null ? Integer.parseInt(m.group(2)) : 0;
+			numericScale = m.group(3) != null ? Integer.parseInt(m.group(3)) : 0;
+		}
 
 		return new DbColumnType(typeName, charByteSize, numericPrecision, numericScale, nullable, autoIncrement,
 				defaultValue);
@@ -995,16 +1008,23 @@ public class SqlDdlParser {
 		final List<String> entries = new ArrayList<>();
 		final StringBuilder buf = new StringBuilder();
 		int depth = 0;
+		boolean inSingleQuote = false;
 
 		for (int i = 0; i < body.length(); i++) {
 			final char c = body.charAt(i);
-			if (c == '(') {
+			if (c == '\'' && !inSingleQuote) {
+				inSingleQuote = true;
+				buf.append(c);
+			} else if (c == '\'' && inSingleQuote) {
+				inSingleQuote = false;
+				buf.append(c);
+			} else if (!inSingleQuote && c == '(') {
 				depth++;
 				buf.append(c);
-			} else if (c == ')') {
+			} else if (!inSingleQuote && c == ')') {
 				depth--;
 				buf.append(c);
-			} else if (c == ',' && depth == 0) {
+			} else if (!inSingleQuote && c == ',' && depth == 0) {
 				final String e = buf.toString().trim();
 				if (!e.isEmpty()) {
 					entries.add(e);

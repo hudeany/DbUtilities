@@ -8,7 +8,7 @@ public enum DbVendor {
 	Firebird("org.firebirdsql.jdbc.FBDriver", 3050, "SELECT 1 FROM RDB$RELATION_FIELDS ROWS 1"),
 	SQLite("org.sqlite.JDBC", 0, "SELECT 1"),
 	Derby("org.apache.derby.jdbc.EmbeddedDriver", 0, "SELECT 1 FROM SYSIBM.SYSDUMMY1"),
-	HSQL("org.hsqldb.jdbc.JDBCDriver", 0, "SELECT 1 FROM SYSIBM.SYSDUMMY1"),
+	HSQL("org.hsqldb.jdbc.JDBCDriver", 0, "SELECT 1"),
 	Cassandra("com.simba.cassandra.jdbc42.Driver", 9042, ""),
 	MsSQL("com.microsoft.sqlserver.jdbc.SQLServerDriver", 1433, "SELECT 1");
 

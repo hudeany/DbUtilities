@@ -1801,7 +1801,7 @@ public class DbUtilities {
 				preparedStatement.setFetchSize(100);
 				preparedStatement.setNString(1, tablespaceName.toLowerCase());
 				try (ResultSet resultSet = preparedStatement.executeQuery()) {
-					return resultSet.getInt(1) > 0;
+					return resultSet.next() && resultSet.getInt(1) > 0;
 				}
 			} catch (final Exception e) {
 				throw new Exception("Cannot check database tablespace " + tablespaceName + ": " + e.getMessage(), e);
@@ -2210,13 +2210,16 @@ public class DbUtilities {
 				}
 			} else if (DbVendor.MsSQL == dbVendor) {
 				tableQuery = "SELECT DISTINCT table_name FROM information_schema.tables";
+				boolean firstCondition = true;
 				for (String tablePattern : tablePatternExpression.split(",| |;|\\||\n")) {
 					if (Utilities.isNotBlank(tablePattern)) {
 						tablePattern = tablePattern.trim().replace("%", "\\%").replace("_", "\\_").replace("*", "%").replace("?", "_");
+						final String conjunction = firstCondition ? " WHERE " : " AND ";
+						firstCondition = false;
 						if (tablePattern.startsWith("!")) {
-							tableQuery += " WHERE table_name NOT LIKE '" + tablePattern.substring(1) + "' ESCAPE '\\'";
+							tableQuery += conjunction + "table_name NOT LIKE '" + tablePattern.substring(1) + "' ESCAPE '\\'";
 						} else {
-							tableQuery += " WHERE table_name LIKE '" + tablePattern + "' ESCAPE '\\'";
+							tableQuery += conjunction + "table_name LIKE '" + tablePattern + "' ESCAPE '\\'";
 						}
 					}
 				}

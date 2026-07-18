@@ -416,7 +416,7 @@ public class SqlDdlMergeGenerator {
 
 		if (base.getUniqueKeys() != null) {
 			for (final Map.Entry<String, List<String>> uq : base.getUniqueKeys().entrySet()) {
-				if (!other.getUniqueKeys().containsKey(uq.getKey())) {
+				if (other.getUniqueKeys() == null || !other.getUniqueKeys().containsKey(uq.getKey())) {
 					result.addUniqueKey(uq.getKey(), uq.getValue());
 					stats.uniqueFromA++;
 				}
