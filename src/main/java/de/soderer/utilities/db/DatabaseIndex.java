@@ -19,8 +19,12 @@ public class DatabaseIndex {
 		return tableName;
 	}
 
-	public DatabaseIndex setTableName(final String tableName) {
+	public void setTableName(final String tableName) {
 		this.tableName = tableName;
+	}
+
+	public DatabaseIndex withTableName(final String newTableName) {
+		setTableName(newTableName);
 		return this;
 	}
 
@@ -28,8 +32,12 @@ public class DatabaseIndex {
 		return indexName;
 	}
 
-	public DatabaseIndex setIndexName(final String indexName) {
+	public void setIndexName(final String indexName) {
 		this.indexName = indexName;
+	}
+
+	public DatabaseIndex withIndexName(final String newIndexName) {
+		setIndexName(newIndexName);
 		return this;
 	}
 
@@ -37,8 +45,12 @@ public class DatabaseIndex {
 		return indexedColumns;
 	}
 
-	public DatabaseIndex setIndexedColumns(final List<String> indexedColumns) {
+	public void setIndexedColumns(final List<String> indexedColumns) {
 		this.indexedColumns = indexedColumns;
+	}
+
+	public DatabaseIndex withIndexedColumns(final List<String> newIndexedColumns) {
+		setIndexedColumns(newIndexedColumns);
 		return this;
 	}
 

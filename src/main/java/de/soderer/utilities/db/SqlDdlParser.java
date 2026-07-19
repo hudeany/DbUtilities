@@ -161,7 +161,7 @@ public class SqlDdlParser {
 			return;
 		}
 		final String schemaName = unquote(m.group(1));
-		final DbSchema schema = new DbSchema().setSchemaName(schemaName);
+		final DbSchema schema = new DbSchema().withSchemaName(schemaName);
 		structure.createSchema(schemaName, schema);
 	}
 
@@ -205,7 +205,7 @@ public class SqlDdlParser {
 		}
 
 		// Build table
-		final DbTable table = new DbTable().setTableName(tableName);
+		final DbTable table = new DbTable().withTableName(tableName);
 		final LinkedHashMap<String, DbColumn> columns = new LinkedHashMap<>();
 		final List<String> pkCols = new ArrayList<>();
 		final LinkedHashMap<String, List<String>> uniqueKeys = new LinkedHashMap<>();
@@ -695,7 +695,7 @@ public class SqlDdlParser {
 		// --- assemble type ---
 		final DbColumnType columnType = parseColumnType(typeStr, nullable, autoIncrement, defaultValue);
 
-		return new DbColumn().setColumnName(columnName).setColumnType(columnType).setColumnComment(columnComment);
+		return new DbColumn().withColumnName(columnName).withColumnType(columnType).withColumnComment(columnComment);
 	}
 
 	// -------------------------------------------------------------------------
@@ -949,7 +949,7 @@ public class SqlDdlParser {
 
 	private static void ensureSchema(final String schemaName, final DbStructure structure) throws DbStructureException {
 		if (!structure.getSchemas().containsKey(schemaName)) {
-			structure.createSchema(schemaName, new DbSchema().setSchemaName(schemaName));
+			structure.createSchema(schemaName, new DbSchema().withSchemaName(schemaName));
 		}
 	}
 

@@ -20,8 +20,12 @@ public class DbTable {
 		return tableName;
 	}
 
-	public DbTable setTableName(final String tableName) {
+	public void setTableName(final String tableName) {
 		this.tableName = tableName.toLowerCase().trim();
+	}
+
+	public DbTable withTableName(final String newTableName) {
+		setTableName(newTableName);
 		return this;
 	}
 
@@ -33,8 +37,12 @@ public class DbTable {
 		return primaryKey;
 	}
 
-	public DbTable setPrimaryKey(final List<String> primaryKey) {
+	public void setPrimaryKey(final List<String> primaryKey) {
 		this.primaryKey = primaryKey;
+	}
+
+	public DbTable withPrimaryKey(final List<String> newPrimaryKey) {
+		setPrimaryKey(newPrimaryKey);
 		return this;
 	}
 
@@ -64,8 +72,12 @@ public class DbTable {
 		return tableComment;
 	}
 
-	public DbTable setTableComment(final String tableComment) {
+	public void setTableComment(final String tableComment) {
 		this.tableComment = tableComment;
+	}
+
+	public DbTable withTableComment(final String newTableComment) {
+		setTableComment(newTableComment);
 		return this;
 	}
 

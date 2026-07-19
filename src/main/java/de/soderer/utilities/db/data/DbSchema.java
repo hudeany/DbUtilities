@@ -14,8 +14,12 @@ public class DbSchema {
 		return schemaName;
 	}
 
-	public DbSchema setSchemaName(final String schemaName) {
+	public void setSchemaName(final String schemaName) {
 		this.schemaName = schemaName.toLowerCase().trim();
+	}
+
+	public DbSchema withSchemaName(final String newSchemaName) {
+		setSchemaName(newSchemaName);
 		return this;
 	}
 
@@ -27,8 +31,12 @@ public class DbSchema {
 		return schemaComment;
 	}
 
-	public DbSchema setSchemaComment(final String schemaComment) {
+	public void setSchemaComment(final String schemaComment) {
 		this.schemaComment = schemaComment;
+	}
+
+	public DbSchema withSchemaComment(final String newSchemaComment) {
+		setSchemaComment(newSchemaComment);
 		return this;
 	}
 

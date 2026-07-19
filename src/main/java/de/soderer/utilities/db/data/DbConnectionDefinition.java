@@ -58,12 +58,22 @@ public class DbConnectionDefinition {
 		this.dbVendor = dbVendor;
 	}
 
+	public DbConnectionDefinition withDbVendor(final DbVendor newDbVendor) {
+		setDbVendor(newDbVendor);
+		return this;
+	}
+
 	public String getHostnameAndPort() {
 		return hostnameAndPort;
 	}
 
 	public void setHostnameAndPort(final String hostnameAndPort) {
 		this.hostnameAndPort = hostnameAndPort;
+	}
+
+	public DbConnectionDefinition withHostnameAndPort(final String newHostnameAndPort) {
+		setHostnameAndPort(newHostnameAndPort);
+		return this;
 	}
 
 	public String getDbName() {
@@ -74,12 +84,22 @@ public class DbConnectionDefinition {
 		this.dbName = dbName;
 	}
 
+	public DbConnectionDefinition withDbName(final String newDbName) {
+		setDbName(newDbName);
+		return this;
+	}
+
 	public String getUsername() {
 		return username;
 	}
 
 	public void setUsername(final String username) {
 		this.username = username;
+	}
+
+	public DbConnectionDefinition withUsername(final String newUsername) {
+		setUsername(newUsername);
+		return this;
 	}
 
 	public char[] getPassword() {
@@ -90,12 +110,22 @@ public class DbConnectionDefinition {
 		this.password = password;
 	}
 
+	public DbConnectionDefinition withPassword(final char[] newPassword) {
+		setPassword(newPassword);
+		return this;
+	}
+
 	public boolean isSecureConnection() {
 		return secureConnection;
 	}
 
 	public void setSecureConnection(final boolean secureConnection) {
 		this.secureConnection = secureConnection;
+	}
+
+	public DbConnectionDefinition withSecureConnection(final boolean newSecureConnection) {
+		setSecureConnection(newSecureConnection);
+		return this;
 	}
 
 	public File getTrustStoreFile() {
@@ -106,12 +136,22 @@ public class DbConnectionDefinition {
 		this.trustStoreFile = trustStoreFile;
 	}
 
+	public DbConnectionDefinition withTrustStoreFile(final File newTrustStoreFile) {
+		setTrustStoreFile(newTrustStoreFile);
+		return this;
+	}
+
 	public char[] getTrustStorePassword() {
 		return trustStorePassword;
 	}
 
 	public void setTrustStorePassword(final char[] trustStorePassword) {
 		this.trustStorePassword = trustStorePassword;
+	}
+
+	public DbConnectionDefinition withTrustStorePassword(final char[] newTrustStorePassword) {
+		setTrustStorePassword(newTrustStorePassword);
+		return this;
 	}
 
 	public void checkParameters() throws Exception {

@@ -23,12 +23,22 @@ public class DatabaseForeignKey {
 		this.foreignKeyName = foreignKeyName;
 	}
 
+	public DatabaseForeignKey withForeignKeyName(final String newForeignKeyName) {
+		setForeignKeyName(newForeignKeyName);
+		return this;
+	}
+
 	public String getTableName() {
 		return tableName;
 	}
 
 	public void setTableName(final String tableName) {
 		this.tableName = tableName;
+	}
+
+	public DatabaseForeignKey withTableName(final String newTableName) {
+		setTableName(newTableName);
+		return this;
 	}
 
 	public String getColumnName() {
@@ -39,6 +49,11 @@ public class DatabaseForeignKey {
 		this.columnName = columnName;
 	}
 
+	public DatabaseForeignKey withColumnName(final String newColumnName) {
+		setColumnName(newColumnName);
+		return this;
+	}
+
 	public String getReferencedTableName() {
 		return referencedTableName;
 	}
@@ -47,12 +62,22 @@ public class DatabaseForeignKey {
 		this.referencedTableName = referencedTableName;
 	}
 
+	public DatabaseForeignKey withReferencedTableName(final String newReferencedTableName) {
+		setReferencedTableName(newReferencedTableName);
+		return this;
+	}
+
 	public String getReferencedColumnName() {
 		return referencedColumnName;
 	}
 
 	public void setReferencedColumnName(final String referencedColumnName) {
 		this.referencedColumnName = referencedColumnName;
+	}
+
+	public DatabaseForeignKey withReferencedColumnName(final String newReferencedColumnName) {
+		setReferencedColumnName(newReferencedColumnName);
+		return this;
 	}
 	
 	@Override

@@ -42,12 +42,22 @@ public class DatabaseConstraint {
 		this.tableName = tableName;
 	}
 
+	public DatabaseConstraint withTableName(final String newTableName) {
+		setTableName(newTableName);
+		return this;
+	}
+
 	public String getConstraintName() {
 		return constraintName;
 	}
 
 	public void setConstraintName(final String constraintName) {
 		this.constraintName = constraintName;
+	}
+
+	public DatabaseConstraint withConstraintName(final String newConstraintName) {
+		setConstraintName(newConstraintName);
+		return this;
 	}
 
 	public ConstraintType getConstraintType() {
@@ -58,6 +68,11 @@ public class DatabaseConstraint {
 		this.constraintType = constraintType;
 	}
 
+	public DatabaseConstraint withConstraintType(final ConstraintType newConstraintType) {
+		setConstraintType(newConstraintType);
+		return this;
+	}
+
 	public String getColumnName() {
 		return columnName;
 	}
@@ -66,12 +81,22 @@ public class DatabaseConstraint {
 		this.columnName = columnName;
 	}
 
+	public DatabaseConstraint withColumnName(final String newColumnName) {
+		setColumnName(newColumnName);
+		return this;
+	}
+
 	public String getCondition() {
 		return condition;
 	}
 
 	public void setCondition(String condition) {
 		this.condition = condition;
+	}
+
+	public DatabaseConstraint withCondition(final String newCondition) {
+		setCondition(newCondition);
+		return this;
 	}
 	
 	@Override

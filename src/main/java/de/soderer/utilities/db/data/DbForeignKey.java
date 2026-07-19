@@ -12,8 +12,12 @@ public class DbForeignKey {
 		return foreignKeyName;
 	}
 
-	public DbForeignKey setForeignKeyName(final String foreignKeyName) {
+	public void setForeignKeyName(final String foreignKeyName) {
 		this.foreignKeyName = foreignKeyName;
+	}
+
+	public DbForeignKey withForeignKeyName(final String newForeignKeyName) {
+		setForeignKeyName(newForeignKeyName);
 		return this;
 	}
 
@@ -21,8 +25,12 @@ public class DbForeignKey {
 		return columnNames;
 	}
 
-	public DbForeignKey setColumnNames(final List<String> columnNames) {
+	public void setColumnNames(final List<String> columnNames) {
 		this.columnNames = columnNames;
+	}
+
+	public DbForeignKey withColumnNames(final List<String> newColumnNames) {
+		setColumnNames(newColumnNames);
 		return this;
 	}
 
@@ -30,8 +38,12 @@ public class DbForeignKey {
 		return referencedTableName;
 	}
 
-	public DbForeignKey setReferencedTableName(final String referencedTableName) {
+	public void setReferencedTableName(final String referencedTableName) {
 		this.referencedTableName = referencedTableName;
+	}
+
+	public DbForeignKey withReferencedTableName(final String newReferencedTableName) {
+		setReferencedTableName(newReferencedTableName);
 		return this;
 	}
 
@@ -39,8 +51,12 @@ public class DbForeignKey {
 		return referencedColumnNames;
 	}
 
-	public DbForeignKey setReferencedColumnNames(final List<String> referencedColumnNames) {
+	public void setReferencedColumnNames(final List<String> referencedColumnNames) {
 		this.referencedColumnNames = referencedColumnNames;
+	}
+
+	public DbForeignKey withReferencedColumnNames(final List<String> newReferencedColumnNames) {
+		setReferencedColumnNames(newReferencedColumnNames);
 		return this;
 	}
 }

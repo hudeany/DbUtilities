@@ -9,8 +9,12 @@ public class DbColumn {
 		return columnName;
 	}
 
-	public DbColumn setColumnName(final String columnName) {
+	public void setColumnName(final String columnName) {
 		this.columnName = columnName.toLowerCase().trim();
+	}
+
+	public DbColumn withColumnName(final String newColumnName) {
+		setColumnName(newColumnName);
 		return this;
 	}
 
@@ -18,8 +22,12 @@ public class DbColumn {
 		return columnType;
 	}
 
-	public DbColumn setColumnType(final DbColumnType columnType) {
+	public void setColumnType(final DbColumnType columnType) {
 		this.columnType = columnType;
+	}
+
+	public DbColumn withColumnType(final DbColumnType newColumnType) {
+		setColumnType(newColumnType);
 		return this;
 	}
 
@@ -27,8 +35,12 @@ public class DbColumn {
 		return columnComment;
 	}
 
-	public DbColumn setColumnComment(final String columnComment) {
+	public void setColumnComment(final String columnComment) {
 		this.columnComment = columnComment;
+	}
+
+	public DbColumn withColumnComment(final String newColumnComment) {
+		setColumnComment(newColumnComment);
 		return this;
 	}
 }
