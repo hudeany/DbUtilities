@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import de.soderer.utilities.db.utilities.CaseInsensitiveOrderedMap;
+import de.soderer.utilities.db.utilities.CaseInsensitiveLinkedMap;
 import de.soderer.utilities.db.utilities.MultiValueCaseInsensitiveOrderedMap;
 import de.soderer.utilities.db.utilities.Tuple;
 import de.soderer.utilities.db.utilities.Utilities;
@@ -104,7 +104,7 @@ public class OracleTnsnamesReader implements Closeable {
 		if (inputReader == null) {
 			throw new Exception("OracleTnsnamesReader position was already initialized for other read operation");
 		} else {
-			final Map<String, OracleTnsMapValue> tnsNamesEntries = new CaseInsensitiveOrderedMap<>();
+			final Map<String, OracleTnsMapValue> tnsNamesEntries = new CaseInsensitiveLinkedMap<>();
 
 			Tuple<String, OracleTnsMapValue> tnsNameEntry;
 			while ((tnsNameEntry = readTnsNameEntry()) != null) {
