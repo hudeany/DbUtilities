@@ -215,7 +215,7 @@ public class DbUtilities {
 			"whenever", "where", "with", "work", "write", "xml", "xmlexists", "xmlparse", "xmlserialize", "year" });
 
 	/**
-	 * DevNull used to prevent creation of file "derby.log"
+	 * Output stream discarding all data, used to prevent the creation of the file "derby.log".
 	 */
 	public static final OutputStream DEV_NULL = new OutputStream() {
 		@Override
@@ -225,8 +225,9 @@ public class DbUtilities {
 	};
 
 	/**
-	 * In an Oracle database the statement "SELECT CURRENT_TIMESTAMP FROM DUAL" return this special Oracle type "oracle.sql.TIMESTAMPTZ",
-	 * which is not listed in java.sql.Types, but can be read via ResultSet.getTimestamp(i) into a normal java.sql.Timestamp object
+	 * Type code of the special Oracle type {@code oracle.sql.TIMESTAMPTZ}, returned for example by the statement
+	 * {@code SELECT CURRENT_TIMESTAMP FROM DUAL}. It is not listed in {@link java.sql.Types}, but can be read via
+	 * {@link java.sql.ResultSet#getTimestamp(int)} into a normal {@link java.sql.Timestamp} object.
 	 */
 	public static final int ORACLE_TIMESTAMPTZ_TYPECODE = -101;
 
@@ -1787,12 +1788,12 @@ public class DbUtilities {
 	}
 
 	/**
-	 * Check if oracle tablespace exists
+	 * Checks if an Oracle tablespace exists (case-insensitive).
 	 *
-	 * @param connection
-	 * @param tablespaceName
-	 * @return
-	 * @throws Exception
+	 * @param connection database connection
+	 * @param tablespaceName name of the tablespace
+	 * @return true if the tablespace exists, false if not or if the database is not an Oracle database or the name is null
+	 * @throws Exception if the tablespaces cannot be read
 	 */
 	public static boolean checkOracleTablespaceExists(final Connection connection, final String tablespaceName) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
@@ -1894,12 +1895,13 @@ public class DbUtilities {
 	}
 
 	/**
-	 * tablePatternExpression contains a comma-separated list of tablenames with wildcards *? and !(not, before tablename)
+	 * Returns the names of all tables matching the given pattern expression.
 	 *
-	 * @param connection
-	 * @param tablePatternExpression
-	 * @return
-	 * @throws Exception
+	 * @param connection database connection
+	 * @param tablePatternExpression list of table name patterns, separated by comma, blank, semicolon, pipe or line break.
+	 *            Patterns may contain the wildcards {@code *} and {@code ?}. A leading {@code !} excludes the matching tables.
+	 * @return names of the matching tables
+	 * @throws Exception if the tables cannot be read
 	 */
 	public static List<String> getAvailableTables(final Connection connection, final String tablePatternExpression) throws Exception {
 		try (Statement statement = connection.createStatement()) {
@@ -2493,15 +2495,15 @@ public class DbUtilities {
 	}
 
 	/**
-	 * Update the duplicateIndexColumn column of all entries of a table with the minimum index value from itemIndexColumn of other duplicates.
+	 * Sets the duplicateIndexColumn of all entries of a table to the minimum itemIndexColumn value of all entries
+	 * with the same key values (duplicates). The changes are committed.
 	 *
-	 * @param connection
-	 * @param tableName
-	 * @param keyColumns
-	 * @param keyColumnsWithFunctions
-	 * @param itemIndexColumn
-	 * @param duplicateIndexColumn
-	 * @throws Exception
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param keyColumnsWithFunctions key columns defining duplicates, optionally wrapped in a function like {@code LOWER(email)}
+	 * @param itemIndexColumn column with the index of each entry
+	 * @param duplicateIndexColumn column to store the index of the first duplicate in
+	 * @throws Exception if no key columns are given or the update fails (the changes are rolled back then)
 	 */
 	public static void markDuplicates(final Connection connection, final String tableName, final Collection<String> keyColumnsWithFunctions, String itemIndexColumn, String duplicateIndexColumn) throws Exception {
 		if (Utilities.isNotEmpty(keyColumnsWithFunctions)) {
@@ -2544,7 +2546,7 @@ public class DbUtilities {
 				connection.commit();
 			} catch (final Exception e) {
 				connection.rollback();
-				throw new Exception("Cannot markTrailingDuplicates: " + e.getMessage(), e);
+				throw new Exception("Cannot markDuplicates: " + e.getMessage(), e);
 			}
 		} else {
 			throw new Exception("Cannot markDuplicates: Missing keycolumns");
@@ -3220,23 +3222,24 @@ public class DbUtilities {
 	}
 
 	/**
-	 * Check for existing index
-	 * Returns null, if check cannot be executed (happens on some database vendors)
+	 * Checks if each of the given columns is part of an index of the table.
+	 * Supported for Oracle, MySQL and MariaDB.
 	 *
-	 * @param connection
-	 * @param tableName
-	 * @param keyColumns
-	 * @return
-	 * @throws Exception
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param keyColumns columns to check
+	 * @return true if all columns are indexed, false if not, null if the check is not available for this database vendor
+	 * @throws Exception if the index information cannot be read
+	 * @throws RuntimeException for Cassandra databases, which are not supported
 	 */
 	public static Boolean checkForIndex(final Connection connection, final String tableName, final List<String> keyColumns) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
 		if (dbVendor == DbVendor.Oracle) {
+			// Dictionary views contain the plain names, so quoted names must be unescaped and not escaped
 			try (PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM user_ind_columns WHERE LOWER(table_name) = ? AND LOWER(column_name) = ?")) {
-				for (String keyColumn : keyColumns) {
-					keyColumn = escapeVendorReservedNames(dbVendor, keyColumn);
-					statement.setNString(1, tableName.toLowerCase());
-					statement.setNString(2, keyColumn.toLowerCase());
+				for (final String keyColumn : keyColumns) {
+					statement.setNString(1, unescapeVendorReservedNames(dbVendor, tableName.trim()).toLowerCase());
+					statement.setNString(2, unescapeVendorReservedNames(dbVendor, keyColumn.trim()).toLowerCase());
 					try (ResultSet resultSet = statement.executeQuery()) {
 						if (!resultSet.next() || resultSet.getInt(1) <= 0) {
 							return false;
@@ -3245,26 +3248,29 @@ public class DbUtilities {
 				}
 				return true;
 			}
-		} else if (dbVendor == DbVendor.MySQL) {
-			try (PreparedStatement statement = connection.prepareStatement("SHOW INDEX FROM " + tableName.toLowerCase() + " WHERE column_name = ?")) {
-				for (String keyColumn : keyColumns) {
-					keyColumn = escapeVendorReservedNames(dbVendor, keyColumn);
-					statement.setNString(1, keyColumn.toLowerCase());
-					try (ResultSet resultSet = statement.executeQuery()) {
-						if (!resultSet.next()) {
-							return false;
-						}
-					}
-				}
-				return true;
+		} else if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
+			// information_schema with bind variables instead of "SHOW INDEX FROM <tableName>", so the table name cannot inject SQL
+			String schemaName = null;
+			String plainTableName = tableName.trim();
+			if (plainTableName.contains(".")) {
+				schemaName = unescapeVendorReservedNames(dbVendor, plainTableName.substring(0, plainTableName.indexOf(".")));
+				plainTableName = plainTableName.substring(plainTableName.indexOf(".") + 1);
 			}
-		} else if (dbVendor == DbVendor.MariaDB) {
-			try (PreparedStatement statement = connection.prepareStatement("SHOW INDEX FROM " + tableName.toLowerCase() + " WHERE column_name = ?")) {
-				for (String keyColumn : keyColumns) {
-					keyColumn = escapeVendorReservedNames(dbVendor, keyColumn);
-					statement.setNString(1, keyColumn.toLowerCase());
+			plainTableName = unescapeVendorReservedNames(dbVendor, plainTableName);
+
+			final String indexQuery = "SELECT COUNT(*) FROM information_schema.statistics"
+					+ " WHERE table_schema = " + (schemaName == null ? "DATABASE()" : "?")
+					+ " AND LOWER(table_name) = ? AND LOWER(column_name) = ?";
+			try (PreparedStatement statement = connection.prepareStatement(indexQuery)) {
+				for (final String keyColumn : keyColumns) {
+					int parameterIndex = 1;
+					if (schemaName != null) {
+						statement.setString(parameterIndex++, schemaName);
+					}
+					statement.setString(parameterIndex++, plainTableName.toLowerCase());
+					statement.setString(parameterIndex, unescapeVendorReservedNames(dbVendor, keyColumn.trim()).toLowerCase());
 					try (ResultSet resultSet = statement.executeQuery()) {
-						if (!resultSet.next()) {
+						if (!resultSet.next() || resultSet.getInt(1) <= 0) {
 							return false;
 						}
 					}
@@ -3361,10 +3367,11 @@ public class DbUtilities {
 	}
 
 	/**
-	 * Special shutdown command to free single user derby database for next connection maybe of another thread
+	 * Shuts down a Derby database, so the single user database is free for the next connection, for example of another thread.
 	 *
-	 * @param dbName
-	 * @throws Exception
+	 * @param dbName path of the Derby database directory ({@code ~} is replaced by the user's home directory)
+	 * @throws DbNotExistsException if the database directory does not exist
+	 * @throws Exception if the path is no directory or the shutdown fails
 	 */
 	public static void shutDownDerbyDb(String dbName) throws Exception {
 		dbName = Utilities.replaceUsersHome(dbName);
@@ -3482,11 +3489,12 @@ public class DbUtilities {
 	}
 
 	/**
-	 * Demand recalculation of Oracle Table stats to enable table indices after creation of big temp tables
+	 * Requests a recalculation of the Oracle table statistics, so the table indices are used after the creation of big temporary tables.
+	 * Does nothing for other database vendors.
 	 *
-	 * @param connection
-	 * @param tableName
-	 * @throws Exception
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @throws Exception if the statistics cannot be gathered
 	 */
 	public static void gatherTableStats(final Connection connection, final String tableName) throws Exception {
 		if (getDbVendor(connection) == DbVendor.Oracle) {
@@ -3500,11 +3508,12 @@ public class DbUtilities {
 					}
 				}
 
+				// Owner and table name as bind variables, so the table name cannot inject PL/SQL
 				final String executeStatement =
 						"begin\n"
 								+ " dbms_stats.gather_table_stats(\n"
-								+ " ownname => '" + username.toUpperCase() + "',\n"
-								+ " tabname => '" + tableName.toUpperCase() + "',\n"
+								+ " ownname => ?,\n"
+								+ " tabname => ?,\n"
 								+ " estimate_percent => 30,\n"
 								+ " method_opt => 'for all columns size 254',\n"
 								+ " cascade => true,\n"
@@ -3512,9 +3521,13 @@ public class DbUtilities {
 								+ " );\n"
 								+ " end;";
 
-				final boolean success = statement.execute(executeStatement);
-				if (!success) {
-					throw new Exception("Cannot gatherTableStats");
+				// execute() returns false for a PL/SQL block (no ResultSet), so only an SQLException indicates a failure
+				try (CallableStatement callableStatement = connection.prepareCall(executeStatement)) {
+					callableStatement.setString(1, username.toUpperCase());
+					callableStatement.setString(2, unescapeVendorReservedNames(DbVendor.Oracle, tableName.trim()).toUpperCase());
+					callableStatement.execute();
+				} catch (final SQLException e) {
+					throw new Exception("Cannot gatherTableStats for table " + tableName + ": " + e.getMessage(), e);
 				}
 			}
 		}

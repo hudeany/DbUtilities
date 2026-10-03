@@ -114,16 +114,16 @@ public class Utilities {
 				glue = "";
 			}
 
-			String returnValue = "";
+			final StringBuilder returnValue = new StringBuilder();
 			boolean isFirst = true;
 			for (final char nextChar : array) {
 				if (!isFirst) {
-					returnValue += glue;
+					returnValue.append(glue);
 				}
-				returnValue += nextChar;
+				returnValue.append(nextChar);
 				isFirst = false;
 			}
-			return returnValue;
+			return returnValue.toString();
 		}
 	}
 
@@ -177,22 +177,29 @@ public class Utilities {
 		}
 	}
 
-	public static String replaceUsersHome(final String filePath) {
+	public static String replaceUsersHome(String filePath) {
 		if (filePath == null) {
 			return filePath;
 		}
 		final String homePath = System.getProperty("user.home");
+
+		// "~" only stands for the home directory at the start of the path, otherwise it is a normal file name character
+		if ("~".equals(filePath)) {
+			filePath = homePath;
+		} else if (filePath.startsWith("~/") || filePath.startsWith("~" + File.separator)) {
+			filePath = homePath + filePath.substring(1);
+		}
+
 		return filePath
-				.replace("~", homePath)
-				.replace("$HOME", homePath)
-				.replace("${HOME}", homePath);
+				.replace("${HOME}", homePath)
+				.replace("$HOME", homePath);
 	}
 
 	/**
-	 * Check for a integer value without decimals
+	 * Checks if the value is an integer number without decimals that fits into an {@code int}.
 	 *
-	 * @param value
-	 * @return
+	 * @param value value to check
+	 * @return true if the value can be parsed as {@code int}, false otherwise (also for null)
 	 */
 	public static boolean isInteger(final String value) {
 		try {
@@ -224,28 +231,33 @@ public class Utilities {
 	}
 
 	/**
-	 * Only trim the value when the surrounding occurs on both ends
-	 * @param value
-	 * @param prefix
-	 * @return
+	 * Removes the surrounding string from both ends of the value, but only if it occurs on both ends.
+	 * Only one occurrence is removed on each end.
+	 *
+	 * @param value value to trim
+	 * @param surrounding string expected at the start and the end of the value
+	 * @return the value without the surrounding string, or the unchanged value if it is not surrounded by it
 	 */
-	public static String trimSimultaneously(final String value, final String sourrounding) {
+	public static String trimSimultaneously(final String value, final String surrounding) {
 		if (value == null) {
 			return null;
-		} else if (isEmpty(sourrounding)) {
+		} else if (isEmpty(surrounding)) {
 			return value;
-		} else if (value.length() >= sourrounding.length() * 2 && value.startsWith(sourrounding) && value.endsWith(sourrounding)) {
-			return value.substring(sourrounding.length(), value.length() - sourrounding.length());
+		} else if (value.length() >= surrounding.length() * 2 && value.startsWith(surrounding) && value.endsWith(surrounding)) {
+			return value.substring(surrounding.length(), value.length() - surrounding.length());
 		} else {
 			return value;
 		}
 	}
 
 	/**
-	 * Get a collection like a set as a ordered list
+	 * Returns the items of a collection (like a set) as sorted list, with the given items placed first.
+	 * The first items keep their given order, all other items are sorted by their natural order.
 	 *
-	 * @param c
-	 * @return
+	 * @param <T> type of the items
+	 * @param collection items to sort
+	 * @param firstItems items to put at the start of the list in this order
+	 * @return new sorted list
 	 */
 	@SafeVarargs
 	public static <T extends Comparable<? super T>> List<T> sortButPutItemsFirst(final Collection<T> collection, final T... firstItems) {
@@ -327,35 +339,39 @@ public class Utilities {
 	}
 
 	/**
-	 * Read a directory and return all files fitting to a regex pattern
+	 * Returns all files of a directory whose names match a regex pattern.
 	 *
-	 * @param startDirectory
-	 * @param patternString
-	 * @param traverseCompletely
-	 * @return
+	 * @param startDirectory directory to search in
+	 * @param patternString regex the whole file name must match
+	 * @param traverseCompletely true to also search all subdirectories recursively
+	 * @return matching files, empty if startDirectory is no directory
 	 */
 	public static List<File> getFilesByPattern(final File startDirectory, final String patternString, final boolean traverseCompletely) {
 		return getFilesByPattern(startDirectory, Pattern.compile(patternString), traverseCompletely);
 	}
 
 	/**
-	 * Read a directory and return all files fitting to a regex pattern
+	 * Returns all files of a directory whose names match a regex pattern.
 	 *
-	 * @param startDirectory
-	 * @param pattern
-	 * @param traverseCompletely
-	 * @return
+	 * @param startDirectory directory to search in
+	 * @param pattern regex the whole file name must match
+	 * @param traverseCompletely true to also search all subdirectories recursively
+	 * @return matching files, empty if startDirectory is no directory
 	 */
 	public static List<File> getFilesByPattern(final File startDirectory, final Pattern pattern, final boolean traverseCompletely) {
 		final List<File> files = new ArrayList<>();
 		if (startDirectory.isDirectory()) {
-			for (final File file : startDirectory.listFiles()) {
-				if (file.isDirectory() && traverseCompletely) {
-					if (traverseCompletely) {
-						files.addAll(getFilesByPattern(file, pattern, traverseCompletely));
+			// listFiles() returns null if the directory cannot be read (e.g. missing permissions or I/O error)
+			final File[] directoryFiles = startDirectory.listFiles();
+			if (directoryFiles != null) {
+				for (final File file : directoryFiles) {
+					if (file.isDirectory()) {
+						if (traverseCompletely) {
+							files.addAll(getFilesByPattern(file, pattern, traverseCompletely));
+						}
+					} else if (file.isFile() && pattern.matcher(file.getName()).matches()) {
+						files.add(file);
 					}
-				} else if (file.isFile() && pattern.matcher(file.getName()).matches()) {
-					files.add(file);
 				}
 			}
 		}
@@ -364,7 +380,12 @@ public class Utilities {
 
 	public static boolean delete(final File file) {
 		if (file.isDirectory()) {
-			for (final File subFile : file.listFiles()) {
+			// listFiles() returns null if the directory cannot be read, so its content cannot be deleted either
+			final File[] subFiles = file.listFiles();
+			if (subFiles == null) {
+				return false;
+			}
+			for (final File subFile : subFiles) {
 				if (!delete(subFile)) {
 					return false;
 				}

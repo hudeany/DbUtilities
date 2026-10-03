@@ -18,11 +18,24 @@ import de.soderer.utilities.sql.whereclause.token.Value;
 import de.soderer.utilities.sql.whereclause.token.Value.Type;
 
 /**
- * Parser for SQL Where-clauses. The parsed has NOT full SQL-Standard functionality. The parsed clause can be output formatted as Oracle, MySQL or BeanShell string.
- *
- * Supported functionality: String-values ( 'abc' ) Number-values ( 1, 2.5 ) Date-values ( date('01.02.2001', 'dd.mm.yyyy') ) Date-conversions ( char(datefield, 'dd.mm.yyyy') ) Systemtime-values (
- * sysdate ) Equations and Comparisons ( =, <, >, >=, <=, !=, <> ) Regular Expressions ( ... like '...' / ... not like '...' ) NullChecks ( ... is null / ... is not null ) ListChecks ( ... in (1, 2,
- * 3) ) Boolean operators ( and, or ) Brackets around expressions Modulo operator ( ... mod 3 = 0 )
+ * Parser for SQL where clauses. The parser does NOT support the full SQL standard.
+ * The parsed clause can be output formatted as Oracle, MySQL or BeanShell string.
+ * <p>
+ * Supported functionality:
+ * <ul>
+ * <li>String values: {@code 'abc'}</li>
+ * <li>Number values: {@code 1}, {@code 2.5}</li>
+ * <li>Date values: {@code date('01.02.2001', 'dd.mm.yyyy')}</li>
+ * <li>Date conversions: {@code char(datefield, 'dd.mm.yyyy')}</li>
+ * <li>System time values: {@code sysdate}</li>
+ * <li>Equations and comparisons: {@code =}, {@code <}, {@code >}, {@code >=}, {@code <=}, {@code !=}, {@code <>}</li>
+ * <li>Regular expressions: {@code ... like '...'}, {@code ... not like '...'}</li>
+ * <li>Null checks: {@code ... is null}, {@code ... is not null}</li>
+ * <li>List checks: {@code ... in (1, 2, 3)}</li>
+ * <li>Boolean operators: {@code and}, {@code or}</li>
+ * <li>Brackets around expressions</li>
+ * <li>Modulo operator: {@code ... mod 3 = 0}</li>
+ * </ul>
  */
 public class ReducedSqlWhereClauseParser {
 	public static RulePart parse(final String formula, final Map<String, Value.Type> descriptors) {
@@ -377,9 +390,9 @@ public class ReducedSqlWhereClauseParser {
 	}
 
 	/**
-	 * Debug Helper Method
+	 * Debug helper method, prints the tokens to stdout in one line with their list index (modulo 10) in the line above.
 	 *
-	 * @param tokens
+	 * @param tokens tokens to print
 	 */
 	public static void printJoinedParts(final List<RulePart> tokens) {
 		final StringBuilder countBuilder = new StringBuilder();
