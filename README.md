@@ -1,9 +1,6 @@
 # DbUtilities
 
 [![Maven Central](https://img.shields.io/maven-central/v/de.soderer/dbutilities)](https://central.sonatype.com/artifact/de.soderer/dbutilities)
-[![Javadoc](https://javadoc.io/badge2/de.soderer/dbutilities/javadoc.svg)](https://javadoc.io/doc/de.soderer/dbutilities)
-[![Java](https://img.shields.io/badge/Java-17%2B-blue)](https://openjdk.org/)
-[![GitHub release](https://img.shields.io/github/v/release/hudeany/DbUtilities)](https://github.com/hudeany/DbUtilities/releases)
 
 **DbUtilities** is a lightweight Java library for working with relational databases via plain JDBC.
 It bundles connection handling, structure inspection, DDL parsing, schema diff/merge generation and SQL formatting
