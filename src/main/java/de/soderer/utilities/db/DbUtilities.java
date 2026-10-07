@@ -18,6 +18,7 @@ import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -50,29 +51,80 @@ import de.soderer.utilities.db.utilities.CaseInsensitiveMap;
 import de.soderer.utilities.db.utilities.CaseInsensitiveSet;
 import de.soderer.utilities.db.utilities.Utilities;
 
+/**
+ * Static helper methods for JDBC database connections, database structure information (tables, columns,
+ * keys, indices, constraints), simple DDL operations and duplicate handling for several database vendors
+ * (see {@link DbVendor}).
+ * <p>
+ * Watch out: Table and column names given to these methods are mostly concatenated into SQL statements,
+ * so they must never contain untrusted user input.
+ */
 public class DbUtilities {
+	/**
+	 * Creates a new instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public DbUtilities() {
+		// Only static methods
+	}
+
+	/**
+	 * Download location of the MySQL JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_MYSQL = "https://dev.mysql.com/downloads/connector/j";
+	/**
+	 * Download location of the MariaDB JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_MARIADB = "https://downloads.mariadb.org/connector-java";
+	/**
+	 * Download location of the Oracle JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_ORACLE = "http://www.oracle.com/technetwork/apps-tech/jdbc-112010-090769.html";
+	/**
+	 * Download location of the PostgreSQL JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_POSTGRESQL = "https://jdbc.postgresql.org/download.html";
+	/**
+	 * Download location of the Firebird JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_FIREBIRD = "http://www.firebirdsql.org/en/jdbc-driver";
+	/**
+	 * Download location of the Apache Derby JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_DERBY = "https://db.apache.org/derby/derby_downloads.html";
+	/**
+	 * Download location of the SQLite JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_SQLITE = "https://bitbucket.org/xerial/sqlite-jdbc/downloads";
+	/**
+	 * Download location of the HSQL JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_HSQL = "http://hsqldb.org/download";
+	/**
+	 * Download location of the Microsoft SQL Server JDBC driver.
+	 */
 	public static final String DOWNLOAD_LOCATION_MSSQL = "https://msdn.microsoft.com/de-de/library/mt683464(v=sql.110).aspx";
 
+	/**
+	 * SQL operators, used to split SQL statements into tokens.
+	 */
 	public static final List<String> SQL_OPERATORS = Arrays.asList(new String[] { "+", "-", "*", "/", "%", "&", "|",
 			"^", "=", "!=", ">", "<", ">=", "<=", "<>", "+=", "-=", "*=", "/=", "%=", "&=", "||", "^-=", "|*=" });
 
+	/**
+	 * Pattern of identifiers that never need to be quoted for syntax reasons (reserved words may still need quoting).
+	 */
 	public static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
 
+	/**
+	 * Reserved words of PostgreSQL, which must be quoted when used as identifiers.
+	 */
 	public static final CaseInsensitiveSet RESERVED_WORDS_POSTGRESQL = new CaseInsensitiveSet(new String[] { "abs", "absent", "acos", "all", "allocate", "alter", "analyse", "analyze",
-			"and", "any", "any_value", "are", "array", "array_agg", "array_​max_​cardinality", "as", "asc", "asensitive", "asin", "asymmetric", "at", "atan", "atomic", "authorization",
+			"and", "any", "any_value", "are", "array", "array_agg", "array_max_cardinality", "as", "asc", "asensitive", "asin", "asymmetric", "at", "atan", "atomic", "authorization",
 			"avg", "begin", "begin_frame", "begin_partition", "between", "bigint", "binary", "bit", "blob", "boolean", "both", "btrim", "by", "call", "called", "cardinality", "cascaded",
 			"case", "cast", "ceil", "ceiling", "char", "char_length", "character", "character_length", "check", "classifier", "clob", "close", "coalesce", "collate", "collation", "collect",
 			"column", "commit", "concurrently", "condition", "connect", "constraint", "contains", "convert", "copy", "corr", "corresponding", "cos", "cosh", "count", "covar_pop", "covar_samp",
 			"create", "cross", "cube", "cume_dist", "current", "current_catalog", "current_date", "current_path", "current_role", "current_row", "current_schema", "current_time",
-			"current_timestamp", "current_user", "current_​default_​transform_​group", "current_​transform_​group_​for_​type", "cursor", "cycle", "datalink", "date", "day", "deallocate",
+			"current_timestamp", "current_user", "current_default_transform_group", "current_transform_group_for_type", "cursor", "cycle", "datalink", "date", "day", "deallocate",
 			"dec", "decfloat", "decimal", "declare", "default", "deferrable", "define", "delete", "dense_rank", "deref", "desc", "describe", "deterministic", "disconnect", "distinct",
 			"dlnewcopy", "dlpreviouscopy", "dlurlcomplete", "dlurlcompleteonly", "dlurlcompletewrite", "dlurlpath", "dlurlpathonly", "dlurlpathwrite", "dlurlscheme", "dlurlserver", "dlvalue",
 			"do", "double", "drop", "dynamic", "each", "element", "else", "empty", "end", "end-exec", "end_frame", "end_partition", "equals", "escape", "every", "except", "exec", "execute",
@@ -96,13 +148,16 @@ public class DbUtilities {
 			"xmlcast", "xmlcomment", "xmlconcat", "xmldocument", "xmlelement", "xmlexists", "xmlforest", "xmliterate", "xmlnamespaces", "xmlparse", "xmlpi", "xmlquery", "xmlroot",
 			"xmlserialize", "xmltable", "xmltext", "xmlvalidate", "year" });
 
+	/**
+	 * Reserved words of Oracle, which must be quoted when used as identifiers.
+	 */
 	public static final CaseInsensitiveSet RESERVED_WORDS_ORACLE = new CaseInsensitiveSet(new String[] { "access", "account", "activate", "add", "admin", "advise", "after", "all",
 			"all_rows", "allocate", "alter", "analyze", "and", "any", "archive", "archivelog", "array", "as", "asc", "at", "audit", "authenticated", "authorization", "autoextend",
 			"automatic", "backup", "become", "before", "begin", "between", "bfile", "bitmap", "blob", "block", "body", "by", "cache", "cache_instances", "cancel", "cascade",
 			"cast", "cfile", "chained", "change", "char", "char_cs", "character", "check", "checkpoint", "choose", "chunk", "clear", "clob", "clone", "close",
 			"close_cached_open_cursors", "cluster", "coalesce", "column", "column_value", "columns", "comment", "commit", "committed", "compatibility", "compile", "complete",
 			"composite_limit", "compress", "compute", "connect", "connect_time", "constraint", "constraints", "contents", "continue", "controlfile", "convert", "cost",
-			"cpu_per_call", "cpu_per_session", "create", "curren_user", "current", "current_schema", "cursor", "cycle", "dangling", "database", "datafile", "datafiles",
+			"cpu_per_call", "cpu_per_session", "create", "current", "current_user", "current_schema", "cursor", "cycle", "dangling", "database", "datafile", "datafiles",
 			"dataobjno", "date", "dba", "dbhigh", "dblow", "dbmac", "deallocate", "debug", "dec", "decimal", "declare", "default", "deferrable", "deferred", "degree", "delete",
 			"deref", "desc", "directory", "disable", "disconnect", "dismount", "distinct", "distributed", "dml", "double", "drop", "dump", "each", "else", "enable", "end",
 			"enforce", "entry", "escape", "except", "exceptions", "exchange", "excluding", "exclusive", "execute", "exists", "expire", "explain", "extent", "extents", "externally",
@@ -131,6 +186,9 @@ public class DbUtilities {
 			"unlock", "unrecoverable", "until", "unusable", "unused", "updatable", "update", "usage", "use", "user", "using", "validate", "validation", "value", "values",
 			"varchar", "varchar2", "varying", "view", "when", "whenever", "where", "with", "without", "work", "write", "writedown", "writeup", "xid", "year", "zone" });
 
+	/**
+	 * Reserved words of MySQL and MariaDB, which must be quoted when used as identifiers.
+	 */
 	public static final CaseInsensitiveSet RESERVED_WORDS_MYSSQL_MARIADB = new CaseInsensitiveSet(new String[] { "accessible", "account", "action", "active", "add", "admin",
 			"after", "against", "aggregate", "algorithm", "all", "alter", "always", "analyse", "analyze", "and", "any", "array", "as", "asc", "ascii", "asensitive", "at",
 			"attribute", "authentication", "auto_increment", "autoextend_size", "avg", "avg_row_length", "backup", "before", "begin", "between", "bigint", "binary", "binlog",
@@ -192,6 +250,9 @@ public class DbUtilities {
 			"virtual", "visible", "wait", "warnings", "week", "weight_string", "when", "where", "while", "window", "with", "without", "work", "wrapper", "write", "x509", "xa",
 			"xid", "xml", "xor", "year", "year_month", "zerofill", "zone" });
 
+	/**
+	 * Reserved words of Apache Derby, which must be quoted when used as identifiers.
+	 */
 	public static final CaseInsensitiveSet RESERVED_WORDS_DERBY = new CaseInsensitiveSet(new String[] { "add", "all", "allocate",
 			"alter", "and", "any", "are", "as", "asc", "assertion", "at", "authorization", "avg", "begin", "between",
 			"bit", "boolean", "both", "by", "call", "cascade", "cascaded", "case", "cast", "char", "character", "check",
@@ -231,6 +292,24 @@ public class DbUtilities {
 	 */
 	public static final int ORACLE_TIMESTAMPTZ_TYPECODE = -101;
 
+	/**
+	 * Generates the JDBC url for a database connection.
+	 * <p>
+	 * For Oracle, an entry of a tnsnames.ora file (in $TNS_ADMIN or $ORACLE_HOME/network/admin) with the name dbName
+	 * is preferred. A dbName enclosed in brackets is used as TNS description, a dbName starting with "/" is used as
+	 * service name instead of a SID.
+	 *
+	 * @param dbVendor database vendor
+	 * @param dbServerHostname hostname of the database server (not used for file databases)
+	 * @param dbServerPort port of the database server, 0 or less for the vendor's default port
+	 * @param dbName database name, or the path for file databases ("~" is replaced by the user's home directory)
+	 * @param secureConnection true to create a url for a secure (TLS) connection (Oracle, MySQL, MariaDB and MsSQL only)
+	 * @param trustStoreFile optional JKS truststore file for secure MySQL and MariaDB connections
+	 * @param trustStorePassword optional password of the truststore file
+	 * @param trustedCN optional expected CN of the server certificate for secure Oracle connections
+	 * @return JDBC url
+	 * @throws Exception if the vendor is unknown, a secure connection is not supported or a tnsnames.ora file cannot be read
+	 */
 	public static String generateUrlConnectionString(final DbVendor dbVendor, String dbServerHostname, int dbServerPort, String dbName, final boolean secureConnection, final File trustStoreFile, final char[] trustStorePassword, final String trustedCN) throws Exception {
 		if (secureConnection && dbVendor != DbVendor.Oracle && dbVendor != DbVendor.MySQL && dbVendor != DbVendor.MariaDB && dbVendor != DbVendor.MsSQL) {
 			throw new Exception("Secure connection is only supported for database vendors Oracle, MySQL, MariaDB, MsSQL");
@@ -359,6 +438,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates a new file database and opens a connection to it. Only SQLite, Derby and HSQL are supported.
+	 *
+	 * @param dbVendor database vendor (SQLite, Derby or HSQL)
+	 * @param dbPath path of the database file or directory ("~" is replaced by the user's home directory)
+	 * @return connection to the new database
+	 * @throws Exception if the vendor is not supported, the database already exists or cannot be created
+	 */
 	public static Connection createNewDatabase(final DbVendor dbVendor, String dbPath) throws Exception {
 		if (dbVendor == null) {
 			throw new Exception("Unknown database vendor");
@@ -366,7 +453,7 @@ public class DbUtilities {
 
 		if (dbVendor == DbVendor.Derby) {
 			// Prevent creation of file "derby.log"
-			System.setProperty("derby.stream.error.field", "de.soderer.utilities.DbUtilities.DEV_NULL");
+			System.setProperty("derby.stream.error.field", "de.soderer.utilities.db.DbUtilities.DEV_NULL");
 		}
 
 		Class.forName(dbVendor.getDriverClassName());
@@ -401,6 +488,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Deletes a file database. Only SQLite, Derby and HSQL file databases are supported.
+	 * A Derby database is shut down before.
+	 *
+	 * @param dbVendor database vendor (SQLite, Derby or HSQL)
+	 * @param dbPath path of the database file or directory ("~" is replaced by the user's home directory)
+	 * @return true if the database was deleted, false if it did not exist
+	 * @throws Exception if the vendor is not supported or a database file cannot be deleted
+	 */
 	public static boolean deleteDatabase(final DbVendor dbVendor, String dbPath) throws Exception {
 		if (dbVendor == null) {
 			throw new Exception("Unknown database vendor");
@@ -409,7 +505,9 @@ public class DbUtilities {
 		if (dbVendor == DbVendor.SQLite) {
 			dbPath = Utilities.replaceUsersHome(dbPath);
 			if (new File(dbPath).exists()) {
-				new File(dbPath).delete();
+				if (!new File(dbPath).delete()) {
+					throw new Exception("Cannot delete SQLite database file '" + dbPath + "'");
+				}
 				return true;
 			} else {
 				return false;
@@ -429,26 +527,10 @@ public class DbUtilities {
 		} else if (dbVendor == DbVendor.HSQL) {
 			dbPath = Utilities.replaceUsersHome(dbPath);
 			if (dbPath.startsWith("/")) {
-				final File baseDirectory = new File(dbPath.substring(0, dbPath.lastIndexOf("/")));
-				final String basename = dbPath.substring(dbPath.lastIndexOf("/") + 1);
-				for (final File fileToDelete : baseDirectory.listFiles()) {
-					if (fileToDelete.getName().startsWith(basename)) {
-						if (!Utilities.delete(fileToDelete)) {
-							throw new Exception("Cannot delete database file '" + fileToDelete.getAbsolutePath() + "'");
-						}
-					}
-				}
+				deleteHsqlDatabaseFiles(new File(dbPath.substring(0, dbPath.lastIndexOf("/"))), dbPath.substring(dbPath.lastIndexOf("/") + 1));
 				return true;
 			} else if (dbPath.matches(".\\:\\\\.*")) {
-				final File baseDirectory = new File(dbPath.substring(0, dbPath.lastIndexOf("\\")));
-				final String basename = dbPath.substring(dbPath.lastIndexOf("\\") + 1);
-				for (final File fileToDelete : baseDirectory.listFiles()) {
-					if (fileToDelete.getName().startsWith(basename)) {
-						if (!Utilities.delete(fileToDelete)) {
-							throw new Exception("Cannot delete database file '" + fileToDelete.getAbsolutePath() + "'");
-						}
-					}
-				}
+				deleteHsqlDatabaseFiles(new File(dbPath.substring(0, dbPath.lastIndexOf("\\"))), dbPath.substring(dbPath.lastIndexOf("\\") + 1));
 				return true;
 			} else {
 				return false;
@@ -458,6 +540,44 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Deletes all files of a HSQL file database. A HSQL file database consists of several files named
+	 * {@code <basename>.<extension>} (e.g. ".properties", ".script", ".log", ".data", ".lck") and an optional
+	 * directory {@code <basename>.tmp}. Only these entries are deleted, other databases with the same name prefix
+	 * (e.g. "test2.script" for basename "test") are left untouched.
+	 *
+	 * @param baseDirectory directory containing the database files
+	 * @param basename name of the database without extension
+	 * @throws Exception if the directory cannot be read or a file cannot be deleted
+	 */
+	private static void deleteHsqlDatabaseFiles(final File baseDirectory, final String basename) throws Exception {
+		final File[] files = baseDirectory.listFiles();
+		if (files == null) {
+			throw new Exception("Cannot read database directory '" + baseDirectory.getAbsolutePath() + "'");
+		}
+		for (final File fileToDelete : files) {
+			if (fileToDelete.getName().startsWith(basename + ".")) {
+				if (!Utilities.delete(fileToDelete)) {
+					throw new Exception("Cannot delete database file '" + fileToDelete.getAbsolutePath() + "'");
+				}
+			}
+		}
+	}
+
+	/**
+	 * Opens a new database connection.
+	 * <p>
+	 * For secure connections without truststore, Oracle uses a temporary truststore containing the server's
+	 * certificate (trust on first use), MySQL and MariaDB trust the server certificate without validation.
+	 * For MySQL and MariaDB the truststore is set as JVM wide system property.
+	 * If the connection fails, a plain TCP connection test is done to give a more detailed error message.
+	 *
+	 * @param dbDefinition connection parameters
+	 * @param retryOnError true to retry once on a {@link SQLRecoverableException}
+	 * @return new database connection
+	 * @throws DbNotExistsException if a file database does not exist
+	 * @throws Exception if parameters are missing or invalid, the JDBC driver is not available or the connection fails
+	 */
 	public static Connection createConnection(final DbConnectionDefinition dbDefinition, final boolean retryOnError) throws Exception {
 		final DbVendor dbVendor = dbDefinition.getDbVendor();
 		final String hostnameAndPort = dbDefinition.getHostnameAndPort();
@@ -485,7 +605,7 @@ public class DbUtilities {
 		try {
 			if (dbVendor == DbVendor.Derby) {
 				// Prevent creation of file "derby.log"
-				System.setProperty("derby.stream.error.field", "de.soderer.utilities.DbUtilities.DEV_NULL");
+				System.setProperty("derby.stream.error.field", "de.soderer.utilities.db.DbUtilities.DEV_NULL");
 			}
 
 			Class.forName(dbVendor.getDriverClassName());
@@ -566,7 +686,7 @@ public class DbUtilities {
 							connection = DriverManager.getConnection(generateUrlConnectionString(dbVendor, hostParts[0], port, dbName, false, null, null, null));
 						}
 					} catch (final Exception e) {
-						if (retryOnError && e.getCause() != null && e.getCause() instanceof SQLRecoverableException) {
+						if (retryOnError && (e instanceof SQLRecoverableException || e.getCause() instanceof SQLRecoverableException)) {
 							if (userName != null && password != null) {
 								connection = DriverManager.getConnection(generateUrlConnectionString(dbVendor, hostParts[0], port, dbName, false, null, null, null), userName, new String(password));
 							} else {
@@ -594,14 +714,24 @@ public class DbUtilities {
 							}
 						}
 
-						props.setProperty("user", userName);
-						props.setProperty("password", new String(password));
+						// Properties is a Hashtable and does not accept null values
+						if (userName != null) {
+							props.setProperty("user", userName);
+						}
+						if (password != null) {
+							props.setProperty("password", new String(password));
+						}
 
 						connection = DriverManager.getConnection(generateUrlConnectionString(dbVendor, hostParts[0], port, dbName, true, trustStoreFile, trustStorePassword, null), props);
 					} else {
 						final Properties props = new Properties();
-						props.setProperty("user", userName);
-						props.setProperty("password", new String(password));
+						// Properties is a Hashtable and does not accept null values
+						if (userName != null) {
+							props.setProperty("user", userName);
+						}
+						if (password != null) {
+							props.setProperty("password", new String(password));
+						}
 
 						String temporaryTrustStoreFilePath = null;
 						if (dbVendor == DbVendor.Oracle) {
@@ -669,6 +799,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Converts a SQLite DATE value into a LocalDate. SQLite has no real date type, so dates are stored as
+	 * milliseconds (Long) or in several String formats (ISO-8601 with or without offset, "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd").
+	 *
+	 * @param valueObject value read from SQLite
+	 * @return date value, or null if valueObject is null
+	 * @throws Exception if the value cannot be parsed
+	 */
 	public static LocalDate extractSqliteLocalDate(final Object valueObject) throws Exception {
 		if (valueObject == null) {
 			return null;
@@ -694,9 +832,6 @@ public class DbUtilities {
 					// ZonedDateTime: "2022-12-13T22:46:44+01:00[Europe/Berlin]" (String)
 					"yyyy-MM-dd'T'HH:mm:ssz",
 
-					// LocalDateTime: "2022-12-13T22:46:44.460515300" (String)
-					"yyyy-MM-dd'T'HH:mm:ss[.n]",
-
 					// LocalDateTime: "2022-12-13T22:46:44.460515" (String)
 					"yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
 
@@ -714,6 +849,13 @@ public class DbUtilities {
 					"yyyy-MM-dd"
 			};
 
+			// ISO formats with any number of fraction digits (0-9), e.g. "2022-12-13T22:46:44.4605153" or "2022-12-13T22:46:44.46+01:00".
+			// The pattern letter "n" (nano-of-second) must not be used for this, because it would read ".460515" as 460515 nanoseconds.
+			final LocalDateTime isoValue = parseIsoLocalDateTime(valueString);
+			if (isoValue != null) {
+				return isoValue.toLocalDate();
+			}
+
 			for (final String pattern : datePatterns) {
 				try {
 					return Utilities.parseLocalDate(pattern, valueString);
@@ -727,6 +869,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Converts a SQLite TIMESTAMP value into a LocalDateTime. SQLite has no real date type, so timestamps are stored as
+	 * milliseconds (Long) or in several String formats (ISO-8601 with or without offset, "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd").
+	 * An offset or zone is ignored, the local date time is returned as written.
+	 *
+	 * @param valueObject value read from SQLite
+	 * @return date time value, or null if valueObject is null
+	 * @throws Exception if the value cannot be parsed
+	 */
 	public static LocalDateTime extractSqliteLocalDateTime(final Object valueObject) throws Exception {
 		if (valueObject == null) {
 			return null;
@@ -752,9 +903,6 @@ public class DbUtilities {
 					// ZonedDateTime: "2022-12-13T22:46:44+01:00[Europe/Berlin]" (String)
 					"yyyy-MM-dd'T'HH:mm:ssz",
 
-					// LocalDateTime: "2022-12-13T22:46:44.460515300" (String)
-					"yyyy-MM-dd'T'HH:mm:ss[.n]",
-
 					// LocalDateTime: "2022-12-13T22:46:44.460515" (String)
 					"yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
 
@@ -767,6 +915,13 @@ public class DbUtilities {
 					// CURRENT_TIMESTAMP: "2022-12-13 21:46:44" (String), CURRENT_TIMESTAMP uses UTC timezone by default
 					"yyyy-MM-dd HH:mm:ss"
 			};
+
+			// ISO formats with any number of fraction digits (0-9), e.g. "2022-12-13T22:46:44.4605153" or "2022-12-13T22:46:44.46+01:00".
+			// The pattern letter "n" (nano-of-second) must not be used for this, because it would read ".460515" as 460515 nanoseconds.
+			final LocalDateTime isoValue = parseIsoLocalDateTime(valueString);
+			if (isoValue != null) {
+				return isoValue;
+			}
 
 			for (final String pattern : dateTimePatterns) {
 				try {
@@ -788,6 +943,32 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Parses an ISO-8601 date time value with or without offset and with any number of fraction digits.
+	 * An offset is ignored, the local date time part is returned as written.
+	 *
+	 * @param value value to parse
+	 * @return parsed value or null if the value is no ISO-8601 date time
+	 */
+	private static LocalDateTime parseIsoLocalDateTime(final String value) {
+		try {
+			return LocalDateTime.parse(value);
+		} catch (@SuppressWarnings("unused") final DateTimeParseException e) {
+			try {
+				return OffsetDateTime.parse(value).toLocalDateTime();
+			} catch (@SuppressWarnings("unused") final DateTimeParseException e2) {
+				return null;
+			}
+		}
+	}
+
+	/**
+	 * Detects the database vendor of a DataSource by its product name.
+	 *
+	 * @param dataSource data source
+	 * @return database vendor
+	 * @throws Exception if no connection can be opened or the vendor is unknown
+	 */
 	public static DbVendor getDbVendor(final DataSource dataSource) throws Exception {
 		try (Connection connection = dataSource.getConnection()) {
 			return getDbVendor(connection);
@@ -796,6 +977,13 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Detects the database vendor of a connection by its product name.
+	 *
+	 * @param connection database connection
+	 * @return database vendor
+	 * @throws Exception if the vendor is unknown or cannot be detected
+	 */
 	public static DbVendor getDbVendor(final Connection connection) throws Exception {
 		try {
 			final DatabaseMetaData databaseMetaData = connection.getMetaData();
@@ -832,12 +1020,25 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the JDBC url of a DataSource.
+	 *
+	 * @param dataSource data source
+	 * @return JDBC url, or null if not available
+	 * @throws SQLException if no connection can be opened
+	 */
 	public static String getDbUrl(final DataSource dataSource) throws SQLException {
 		try (Connection connection = dataSource.getConnection()) {
 			return getDbUrl(connection);
 		}
 	}
 
+	/**
+	 * Returns the JDBC url of a connection.
+	 *
+	 * @param connection database connection
+	 * @return JDBC url, or null if not available
+	 */
 	public static String getDbUrl(final Connection connection) {
 		try {
 			final DatabaseMetaData databaseMetaData = connection.getMetaData();
@@ -851,16 +1052,45 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Checks if a table contains all given columns (case-insensitive).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param columns column names, may be escaped by vendor specific quotes
+	 * @return true if all columns exist
+	 * @throws Exception if the table does not exist or its columns cannot be read
+	 */
 	public static boolean checkTableAndColumnsExist(final Connection connection, final String tableName, final String... columns) throws Exception {
 		return checkTableAndColumnsExist(connection, tableName, false, columns);
 	}
 
+	/**
+	 * Checks if a table contains all given columns (case-insensitive).
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @param throwExceptionOnError true to throw an exception instead of returning false for a missing column
+	 * @param columns column names, may be escaped by vendor specific quotes
+	 * @return true if all columns exist
+	 * @throws Exception if a column is missing (and throwExceptionOnError is set) or the columns cannot be read
+	 */
 	public static boolean checkTableAndColumnsExist(final DataSource dataSource, final String tableName, final boolean throwExceptionOnError, final String... columns) throws Exception {
 		try (Connection connection = dataSource.getConnection()) {
 			return checkTableAndColumnsExist(connection, tableName, throwExceptionOnError, columns);
 		}
 	}
 
+	/**
+	 * Checks if a table contains all given columns (case-insensitive).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param throwExceptionOnError true to throw an exception instead of returning false for a missing column
+	 * @param columns column names, may be escaped by vendor specific quotes
+	 * @return true if all columns exist
+	 * @throws Exception if a column is missing (and throwExceptionOnError is set) or the columns cannot be read
+	 */
 	public static boolean checkTableAndColumnsExist(final Connection connection, final String tableName, final boolean throwExceptionOnError, final String... columns) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
 		final CaseInsensitiveSet dbTableColumns = getColumnNames(connection, tableName);
@@ -878,10 +1108,27 @@ public class DbUtilities {
 		return true;
 	}
 
+	/**
+	 * Checks if a table exists by selecting from it.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return true if the table exists
+	 * @throws Exception if no statement can be created
+	 */
 	public static boolean checkTableExist(final Connection connection, final String tableName) throws Exception {
 		return checkTableExist(connection, tableName, false);
 	}
 
+	/**
+	 * Checks if a table exists by selecting from it.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param throwExceptionOnError true to throw an exception instead of returning false
+	 * @return true if the table exists
+	 * @throws Exception if the table does not exist (and throwExceptionOnError is set) or no statement can be created
+	 */
 	public static boolean checkTableExist(final Connection connection, final String tableName, final boolean throwExceptionOnError) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			statement.setFetchSize(100);
@@ -897,6 +1144,16 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Calls an Oracle stored procedure and returns everything it wrote via DBMS_OUTPUT.
+	 * {@link java.util.Date} parameters are converted to {@link java.sql.Date}.
+	 *
+	 * @param connection Oracle database connection
+	 * @param procedureName name of the stored procedure
+	 * @param parameters parameters of the procedure, may contain null values
+	 * @return output of DBMS_OUTPUT
+	 * @throws SQLException if the procedure call fails
+	 */
 	public static String callStoredProcedureWithDbmsOutput(final Connection connection, final String procedureName, final Object... parameters) throws SQLException {
 		try (CallableStatement callableStatement = connection.prepareCall("begin dbms_output.enable(:1); end;")) {
 			callableStatement.setLong(1, 10000);
@@ -906,12 +1163,12 @@ public class DbUtilities {
 		if (parameters != null) {
 			try (CallableStatement callableStatement = connection.prepareCall("{call " + procedureName + "(" + Utilities.repeat("?", parameters.length, ", ") + ")}")) {
 				for (int i = 0; i < parameters.length; i++) {
-					if (parameters[i].getClass() == Date.class) {
-						parameters[i] = new java.sql.Date(((Date) parameters[i]).getTime());
+					// Convert java.util.Date without changing the caller's parameter array; null parameters are allowed
+					if (parameters[i] != null && parameters[i].getClass() == Date.class) {
+						callableStatement.setObject(i + 1, new java.sql.Date(((Date) parameters[i]).getTime()));
+					} else {
+						callableStatement.setObject(i + 1, parameters[i]);
 					}
-				}
-				for (int i = 0; i < parameters.length; i++) {
-					callableStatement.setObject(i + 1, parameters[i]);
 				}
 				callableStatement.execute();
 			}
@@ -955,6 +1212,14 @@ public class DbUtilities {
 		return dbmsOutput.toString();
 	}
 
+	/**
+	 * Returns the column names of a table.
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @return column names (case-insensitive)
+	 * @throws Exception if the data source is null or the columns cannot be read
+	 */
 	public static CaseInsensitiveSet getColumnNames(final DataSource dataSource, final String tableName) throws Exception {
 		if (dataSource == null) {
 			throw new Exception("Invalid empty dataSource for getColumnNames");
@@ -967,6 +1232,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the column names of a table.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return column names (case-insensitive)
+	 * @throws Exception if a parameter is empty or the columns cannot be read
+	 */
 	public static CaseInsensitiveSet getColumnNames(final Connection connection, final String tableName) throws Exception {
 		if (connection == null) {
 			throw new Exception("Invalid empty connection for getColumnNames");
@@ -984,6 +1257,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the column types of a table.
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @return column types by lowercased column names
+	 * @throws Exception if a parameter is empty, the vendor is not supported or the columns cannot be read
+	 */
 	public static CaseInsensitiveMap<DbColumnType> getColumnDataTypes(final DataSource dataSource, final String tableName) throws Exception {
 		if (dataSource == null) {
 			throw new Exception("Invalid empty dataSource for getColumnDataTypes");
@@ -996,6 +1277,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the column types of a table, read from the vendor specific dictionary views.
+	 * The default values of the returned types are not set, see {@link #getColumnDefaultValues(Connection, String)}.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for PostgreSQL and keyspace prefix for Cassandra
+	 * @return column types by lowercased column names
+	 * @throws Exception if a parameter is empty, the vendor is not supported or the columns cannot be read
+	 */
 	public static CaseInsensitiveMap<DbColumnType> getColumnDataTypes(final Connection connection, final String tableName) throws Exception {
 		if (connection == null) {
 			throw new Exception("Invalid empty connection for getColumnDataTypes");
@@ -1118,10 +1408,6 @@ public class DbUtilities {
 						while (resultSet.next()) {
 							String type = resultSet.getString("columndatatype");
 
-							long characterLength = -1;
-							final int numericPrecision = -1;
-							final int numericScale = -1;
-
 							boolean isNullable;
 							if (Utilities.endsWithIgnoreCase(type, "not null")) {
 								isNullable = false;
@@ -1132,12 +1418,8 @@ public class DbUtilities {
 
 							final boolean autoincrement = !Utilities.isBlank(resultSet.getString("autoincrementvalue"));
 
-							if (type.contains("(")) {
-								characterLength = Long.parseLong(type.substring(type.indexOf("(") + 1, type.indexOf(")")));
-								type = type.substring(0, type.indexOf("("));
-							}
-
-							returnMap.put(resultSet.getString("columnname"), new DbColumnType(type, characterLength, numericPrecision, numericScale, isNullable, autoincrement, null));
+							final DbColumnType typeWithParameters = parseTypeWithParameters(type, isNullable, autoincrement);
+							returnMap.put(resultSet.getString("columnname"), typeWithParameters);
 						}
 					}
 				}
@@ -1220,21 +1502,13 @@ public class DbUtilities {
 					preparedStatement.setFetchSize(100);
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
 						while (resultSet.next()) {
-							long characterLength = -1;
-							final int numericPrecision = -1;
-							final int numericScale = -1;
 							final boolean isNullable = resultSet.getInt("notnull") == 0;
 							// Only the primary key can be auto incremented in SQLite
 							final boolean isAutoIncrement = hasAutoIncrement && resultSet.getInt("pk") > 0;
 
-							String type = resultSet.getString("type");
-
-							if (type.contains("(")) {
-								characterLength = Long.parseLong(type.substring(type.indexOf("(") + 1, type.indexOf(")")));
-								type = type.substring(0, type.indexOf("("));
-							}
-
-							returnMap.put(resultSet.getString("name"), new DbColumnType(type, characterLength, numericPrecision, numericScale, isNullable, isAutoIncrement, null));
+							// SQLite columns may be declared without any type, so the type may be empty
+							final String type = resultSet.getString("type");
+							returnMap.put(resultSet.getString("name"), parseTypeWithParameters(type == null ? "" : type, isNullable, isAutoIncrement));
 						}
 					}
 				}
@@ -1354,6 +1628,45 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates a column type from a type declaration like "VARCHAR(100)", "DECIMAL(10,2)" or "INTEGER".
+	 * A single parameter is used as character length, two parameters are used as numeric precision and scale.
+	 *
+	 * @param typeDeclaration type declaration with optional parameters in brackets
+	 * @param isNullable true if the column is nullable
+	 * @param isAutoIncrement true if the column is auto incremented
+	 * @return column type without default value
+	 */
+	private static DbColumnType parseTypeWithParameters(final String typeDeclaration, final boolean isNullable, final boolean isAutoIncrement) {
+		String type = typeDeclaration;
+		long characterLength = -1;
+		int numericPrecision = -1;
+		int numericScale = -1;
+		if (type.contains("(") && type.indexOf(")") > type.indexOf("(")) {
+			final String[] parameters = type.substring(type.indexOf("(") + 1, type.indexOf(")")).split(",");
+			type = type.substring(0, type.indexOf("(")).trim();
+			try {
+				if (parameters.length >= 2) {
+					numericPrecision = Integer.parseInt(parameters[0].trim());
+					numericScale = Integer.parseInt(parameters[1].trim());
+				} else {
+					characterLength = Long.parseLong(parameters[0].trim());
+				}
+			} catch (@SuppressWarnings("unused") final NumberFormatException e) {
+				// Unparseable type parameters (e.g. "VARCHAR(MAX)") are ignored
+			}
+		}
+		return new DbColumnType(type, characterLength, numericPrecision, numericScale, isNullable, isAutoIncrement, null);
+	}
+
+	/**
+	 * Counts the rows of a table.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return number of rows
+	 * @throws Exception if the table name is empty or the rows cannot be counted
+	 */
 	public static int getTableEntriesCount(final Connection connection, final String tableName) throws Exception {
 		if (Utilities.isBlank(tableName)) {
 			throw new Exception("Invalid empty tableName for getTableEntriesNumber");
@@ -1372,6 +1685,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Checks if a table contains a column (case-insensitive).
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @param columnName name of the column
+	 * @return true if the column exists
+	 * @throws Exception if a parameter is empty or the columns cannot be read
+	 */
 	public static boolean containsColumnName(final DataSource dataSource, final String tableName, final String columnName) throws Exception {
 		if (dataSource == null) {
 			throw new Exception("Invalid empty dataSource for containsColumnName");
@@ -1393,6 +1715,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the default value of a column.
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @param columnName name of the column
+	 * @return default value without surrounding quotes, or null if the column has no default value
+	 * @throws Exception if a parameter is empty or the default value cannot be read
+	 */
 	public static String getColumnDefaultValue(final DataSource dataSource, final String tableName, final String columnName) throws Exception {
 		if (dataSource == null) {
 			throw new Exception("Invalid empty dataSource for getColumnDefaultValue");
@@ -1407,6 +1738,16 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the default value of a column. Supported for Oracle, HSQL, PostgreSQL and vendors with an
+	 * information_schema supporting SCHEMA() (MySQL, MariaDB).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for PostgreSQL
+	 * @param columnName name of the column
+	 * @return default value without surrounding quotes, or null if the column has no default value
+	 * @throws Exception if a parameter is empty or the default value cannot be read
+	 */
 	public static String getColumnDefaultValue(final Connection connection, final String tableName, final String columnName) throws Exception {
 		if (connection == null) {
 			throw new Exception("Invalid empty connection for getColumnDefaultValue");
@@ -1474,7 +1815,7 @@ public class DbUtilities {
 					preparedStatement.setFetchSize(100);
 					if (schemaName == null) {
 						preparedStatement.setString(1, tableNameWithoutSchema);
-						preparedStatement.setString(3, columnName);
+						preparedStatement.setString(2, columnName);
 					} else {
 						preparedStatement.setString(1, schemaName);
 						preparedStatement.setString(2, tableNameWithoutSchema);
@@ -1523,6 +1864,14 @@ public class DbUtilities {
 	}
 
 
+	/**
+	 * Returns the default values of all columns of a table.
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @return default values by lowercased column names (null values for columns without default value)
+	 * @throws Exception if a parameter is empty or the default values cannot be read
+	 */
 	public static CaseInsensitiveMap<Object> getColumnDefaultValues(final DataSource dataSource, final String tableName) throws Exception {
 		if (dataSource == null) {
 			throw new Exception("Invalid empty dataSource for getColumnDefaultValue");
@@ -1535,6 +1884,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the default values of all columns of a table. Supported for Oracle, HSQL, PostgreSQL and vendors
+	 * with an information_schema supporting SCHEMA() (MySQL, MariaDB). PostgreSQL integer defaults are returned as Integer.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for PostgreSQL
+	 * @return default values by lowercased column names (null values for columns without default value)
+	 * @throws Exception if a parameter is empty or the default values cannot be read
+	 */
 	public static CaseInsensitiveMap<Object> getColumnDefaultValues(final Connection connection, final String tableName) throws Exception {
 		if (connection == null) {
 			throw new Exception("Invalid empty connection for getColumnDefaultValue");
@@ -1549,7 +1907,7 @@ public class DbUtilities {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setNString(1, tableName.toUpperCase());
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
-						if (resultSet.next()) {
+						while (resultSet.next()) {
 							final String columnName = resultSet.getString(1);
 							final String defaultvalue = resultSet.getString(2);
 							if (defaultvalue == null || "null".equalsIgnoreCase(defaultvalue)) {
@@ -1568,7 +1926,7 @@ public class DbUtilities {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setNString(1, tableName);
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
-						if (resultSet.next()) {
+						while (resultSet.next()) {
 							final String columnName = resultSet.getString(1);
 							String defaultvalue = resultSet.getString(2);
 							if ("NULL".equalsIgnoreCase(defaultvalue)) {
@@ -1599,7 +1957,7 @@ public class DbUtilities {
 						preparedStatement.setString(2, tableNameWithoutSchema);
 					}
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
-						if (resultSet.next()) {
+						while (resultSet.next()) {
 							final String columnName = resultSet.getString(1);
 							String defaultvalue = resultSet.getString(2);
 							if (defaultvalue != null && defaultvalue.toLowerCase().endsWith("::integer")) {
@@ -1623,7 +1981,7 @@ public class DbUtilities {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setNString(1, tableName);
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
-						if (resultSet.next()) {
+						while (resultSet.next()) {
 							final String columnName = resultSet.getString(1);
 							String defaultvalue = resultSet.getString(2);
 							if ("NULL".equalsIgnoreCase(defaultvalue)) {
@@ -1638,6 +1996,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the SQL expression for a date default value. Supported for Oracle, MySQL and MariaDB.
+	 *
+	 * @param dataSource data source
+	 * @param fieldDefault "sysdate", "sysdate()", "current_timestamp" or a date in the format "dd.MM.yyyy" (Oracle)
+	 * @return SQL expression of the default value
+	 * @throws Exception if the vendor is not supported
+	 */
 	public static String getDateDefaultValue(final DataSource dataSource, final String fieldDefault) throws Exception {
 		final DbVendor dbVendor = getDbVendor(dataSource);
 		if ("sysdate".equalsIgnoreCase(fieldDefault) || "sysdate()".equalsIgnoreCase(fieldDefault) || "current_timestamp".equalsIgnoreCase(fieldDefault)) {
@@ -1659,6 +2025,19 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Adds a column to a table, if it does not exist yet.
+	 *
+	 * @param dataSource data source
+	 * @param tablename name of the table
+	 * @param fieldname name of the new column
+	 * @param fieldType type of the new column
+	 * @param length length for VARCHAR types (100 if 0 or less)
+	 * @param fieldDefault optional default value
+	 * @param notNull true to make the column NOT NULL
+	 * @return true if the column was added, false if a parameter is invalid, the column already exists or the statement failed
+	 * @throws Exception if the existing columns or the vendor cannot be read
+	 */
 	public static boolean addColumnToDbTable(final DataSource dataSource, final String tablename, final String fieldname, String fieldType, int length, final String fieldDefault, final boolean notNull) throws Exception {
 		if (Utilities.isBlank(fieldname)) {
 			return false;
@@ -1686,7 +2065,7 @@ public class DbUtilities {
 			// Default Value
 			if (Utilities.isNotEmpty(fieldDefault)) {
 				if (fieldType.startsWith("VARCHAR")) {
-					addColumnStatement += " DEFAULT '" + fieldDefault + "'";
+					addColumnStatement += " DEFAULT '" + fieldDefault.replace("'", "''") + "'";
 				} else if ("DATE".equalsIgnoreCase(fieldType)) {
 					addColumnStatement += " DEFAULT " + getDateDefaultValue(dataSource, fieldDefault);
 				} else {
@@ -1711,6 +2090,19 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Changes the type of an existing column. Supported for Oracle, MySQL and MariaDB.
+	 *
+	 * @param dataSource data source
+	 * @param tablename name of the table
+	 * @param fieldname name of the column
+	 * @param fieldType new type of the column
+	 * @param length length for VARCHAR types (100 if 0 or less)
+	 * @param fieldDefault optional default value
+	 * @param notNull true to make the column NOT NULL
+	 * @return true if the column was changed, false if a parameter is invalid, the column does not exist or the statement failed
+	 * @throws Exception if the vendor is not supported or the existing columns cannot be read
+	 */
 	public static boolean alterColumnTypeInDbTable(final DataSource dataSource, final String tablename, final String fieldname, String fieldType, int length, final String fieldDefault, final boolean notNull) throws Exception {
 		if (Utilities.isBlank(fieldname)) {
 			return false;
@@ -1737,8 +2129,8 @@ public class DbUtilities {
 
 			// Default Value
 			if (Utilities.isNotEmpty(fieldDefault)) {
-				if ("VARCHAR".equalsIgnoreCase(fieldType)) {
-					changeColumnStatementPart += " DEFAULT '" + fieldDefault + "'";
+				if (fieldType.startsWith("VARCHAR")) {
+					changeColumnStatementPart += " DEFAULT '" + fieldDefault.replace("'", "''") + "'";
 				} else if ("DATE".equalsIgnoreCase(fieldType)) {
 					changeColumnStatementPart += " DEFAULT " + getDateDefaultValue(dataSource, fieldDefault);
 				} else {
@@ -1779,6 +2171,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Checks if an Oracle tablespace exists (case-insensitive).
+	 *
+	 * @param dataSource data source
+	 * @param tablespaceName name of the tablespace
+	 * @return true if the tablespace exists, false if not or if the database is not an Oracle database or the name is null
+	 * @throws Exception if the tablespaces cannot be read
+	 */
 	public static boolean checkOracleTablespaceExists(final DataSource dataSource, final String tablespaceName) throws Exception {
 		try (Connection connection = dataSource.getConnection()) {
 			return checkOracleTablespaceExists(connection, tablespaceName);
@@ -1812,6 +2212,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the primary key columns of a table.
+	 *
+	 * @param dataSource data source
+	 * @param tableName name of the table
+	 * @return primary key column names, empty if the table has no primary key, null if the table name is blank
+	 * @throws Exception if the primary key cannot be read
+	 */
 	public static CaseInsensitiveSet getPrimaryKeyColumns(final DataSource dataSource, final String tableName) throws Exception {
 		try (Connection connection = dataSource.getConnection()) {
 			return getPrimaryKeyColumns(connection, tableName);
@@ -1820,6 +2228,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the primary key columns of a table (the partition key columns for Cassandra).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema or keyspace prefix
+	 * @return primary key column names, empty if the table has no primary key, null if the table name is blank
+	 * @throws Exception if the primary key cannot be read
+	 */
 	public static CaseInsensitiveSet getPrimaryKeyColumns(final Connection connection, String tableName) throws Exception {
 		if (Utilities.isBlank(tableName)) {
 			return null;
@@ -2192,16 +2608,40 @@ public class DbUtilities {
 						final String keySpaceName = resultSet.getString("keyspace_name");
 						if (!systemKeySpaces.contains(keySpaceName)) {
 							final String tableName = resultSet.getString("table_name");
-							boolean addTable = true;
-							for (final String tablePattern : tablePatternExpression.split(",| |;|\\||\n")) {
+							// Same semantics as the LIKE patterns of the other vendors: the whole table name must match,
+							// a leading "!" excludes matching tables
+							boolean hasInclusionPattern = false;
+							boolean included = false;
+							boolean excluded = false;
+							for (String tablePattern : tablePatternExpression.split(",| |;|\\||\n")) {
 								if (Utilities.isNotBlank(tablePattern)) {
-									addTable = false;
-									if (Pattern.compile(tablePattern.replace(".", "\\.").replace("?", ".").replace("*", ".*").replace("_", ".").replace("%", ".*")).matcher(tableName).find()) {
-										addTable = true;
-										break;
+									tablePattern = tablePattern.trim();
+									final boolean isExclusionPattern = tablePattern.startsWith("!");
+									if (isExclusionPattern) {
+										tablePattern = tablePattern.substring(1);
+									} else {
+										hasInclusionPattern = true;
+									}
+									final StringBuilder regex = new StringBuilder();
+									for (final char patternChar : tablePattern.toCharArray()) {
+										if (patternChar == '*' || patternChar == '%') {
+											regex.append(".*");
+										} else if (patternChar == '?' || patternChar == '_') {
+											regex.append(".");
+										} else {
+											regex.append(Pattern.quote(Character.toString(patternChar)));
+										}
+									}
+									if (Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE).matcher(tableName).matches()) {
+										if (isExclusionPattern) {
+											excluded = true;
+										} else {
+											included = true;
+										}
 									}
 								}
 							}
+							final boolean addTable = !excluded && (included || !hasInclusionPattern);
 
 							if (addTable) {
 								tableNamesToExport.add(tableName);
@@ -2241,6 +2681,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates a new table using vendor specific data types for the simple data types of the columns.
+	 *
+	 * @param connection database connection
+	 * @param tablename name of the new table
+	 * @param columnsAndTypes column names and types (a null type creates a VARCHAR(1) column)
+	 * @param keyColumns optional primary key columns, must be contained in columnsAndTypes
+	 * @throws Exception if a key column is missing in the columns or the table cannot be created
+	 */
 	public static void createTable(final Connection connection, final String tablename, final Map<String, DbColumnType> columnsAndTypes, final Collection<String> keyColumns) throws Exception {
 		if (keyColumns != null) {
 			for (String keyColumn : keyColumns) {
@@ -2289,6 +2738,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the vendor specific data type for a simple data type.
+	 *
+	 * @param dbVendor database vendor
+	 * @param simpleDataType simple data type
+	 * @return vendor specific type name, e.g. "VARCHAR2" for Oracle strings
+	 * @throws Exception if the vendor is not supported
+	 */
 	public static String getDataType(final DbVendor dbVendor, final DbSimpleDataType simpleDataType) throws Exception {
 		if (dbVendor == DbVendor.Oracle) {
 			switch (simpleDataType) {
@@ -2425,6 +2882,13 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the name of a {@link Types} constant.
+	 *
+	 * @param typeId value of a {@link Types} constant
+	 * @return name of the type, e.g. "VARCHAR"
+	 * @throws Exception if the type id is unknown
+	 */
 	public static String getTypeNameById(final int typeId) throws Exception {
 		switch (typeId) {
 			case Types.BIT: return "BIT";
@@ -2470,6 +2934,13 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the download location of the JDBC driver of a database vendor.
+	 *
+	 * @param dbVendor database vendor
+	 * @return download url
+	 * @throws Exception if there is no known download location for the vendor
+	 */
 	public static String getDownloadUrl(final DbVendor dbVendor) throws Exception {
 		if (dbVendor == DbVendor.MySQL) {
 			return DOWNLOAD_LOCATION_MYSQL;
@@ -2515,11 +2986,11 @@ public class DbUtilities {
 			final StringBuilder wherePart = new StringBuilder();
 			int columnIndex = 0;
 			for (String columnWithFunction : keyColumnsWithFunctions) {
-				columnWithFunction = escapeVendorReservedNames(dbVendor, columnWithFunction.trim());
+				columnWithFunction = escapeColumnNameOrExpression(dbVendor, columnWithFunction.trim());
 
 				if (selectPart.length() > 0) {
 					selectPart.append(", ");
-					wherePart.append(", ");
+					wherePart.append(" AND ");
 				}
 
 				selectPart.append(columnWithFunction + " AS col" + columnIndex);
@@ -2553,13 +3024,23 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates the condition for comparing the key columns of two tables, e.g. {@code a.id = b.id AND LOWER(a.email) = LOWER(b.email)}.
+	 *
+	 * @param dbVendor database vendor for escaping reserved names
+	 * @param columnNamesWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @param tableAlias1 alias of the first table, may be blank
+	 * @param tableAlias2 alias of the second table, may be blank
+	 * @return equations combined by AND
+	 */
 	public static String getKeyColumnEquationList(final DbVendor dbVendor, final Collection<String> columnNamesWithFunctions, final String tableAlias1, final String tableAlias2) {
 		final StringBuilder returnValue = new StringBuilder();
 		for (String columnName : columnNamesWithFunctions) {
-			columnName = escapeVendorReservedNames(dbVendor, columnName.trim());
+			columnName = escapeColumnNameOrExpression(dbVendor, columnName.trim());
 
 			if (returnValue.length() > 0) {
-				returnValue.append(", ");
+				// The equations are used as conditions within WHERE clauses, so they must be combined by AND
+				returnValue.append(" AND ");
 			}
 
 			if (Utilities.isNotBlank(tableAlias1)) {
@@ -2587,6 +3068,15 @@ public class DbUtilities {
 		return returnValue.toString();
 	}
 
+	/**
+	 * Counts the key values occurring more than once in a table.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param keyColumnsWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @return number of duplicate key values (not the number of duplicate rows)
+	 * @throws Exception if the duplicates cannot be counted
+	 */
 	public static int detectDuplicates(final Connection connection, final String tableName, final Collection<String> keyColumnsWithFunctions) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			final String countDuplicatesStatement = "SELECT COUNT(*) FROM (SELECT COUNT(*) FROM " + tableName + " GROUP BY " + joinColumnVendorEscaped(getDbVendor(connection), keyColumnsWithFunctions) + " HAVING COUNT(*) > 1) subsel";
@@ -2602,6 +3092,16 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Counts the rows of a table whose key values also exist in another table.
+	 *
+	 * @param connection database connection
+	 * @param detectTableName table whose rows are counted
+	 * @param fromTableName table with the existing key values
+	 * @param keyColumnsWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @return number of rows in detectTableName with key values existing in fromTableName
+	 * @throws Exception if the rows cannot be counted
+	 */
 	public static int detectDuplicatesCrossTables(final Connection connection, final String detectTableName, final String fromTableName, final List<String> keyColumnsWithFunctions) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			final String selectDuplicatesNumber = "SELECT COUNT(*) FROM " + detectTableName + " a WHERE EXISTS (SELECT 1 FROM " + fromTableName + " b WHERE " + getKeyColumnEquationList(getDbVendor(connection), keyColumnsWithFunctions, "a", "b") + ")";
@@ -2614,6 +3114,16 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Adds a new BIGINT column with an index to a table. If the column name already exists,
+	 * a suffix "_1" to "_9" is appended.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param columnBaseName base name of the new column
+	 * @return name of the created column
+	 * @throws Exception if no free column name was found or the column cannot be created
+	 */
 	public static String addIndexedIntegerColumn(final Connection connection, final String tableName, final String columnBaseName) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
 
@@ -2642,6 +3152,16 @@ public class DbUtilities {
 		return columnName;
 	}
 
+	/**
+	 * Deletes the rows of a table whose key values also exist in another table. The changes are committed.
+	 *
+	 * @param connection database connection
+	 * @param keepInTableName table with the rows to keep
+	 * @param deleteInTableName table with the rows to delete
+	 * @param keyColumnsWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @return number of deleted rows (0 if no key columns are given)
+	 * @throws Exception if the rows cannot be deleted (the changes are rolled back then)
+	 */
 	public static int dropDuplicatesCrossTable(final Connection connection, final String keepInTableName, final String deleteInTableName, final List<String> keyColumnsWithFunctions) throws Exception {
 		if (Utilities.isNotEmpty(keyColumnsWithFunctions)) {
 			final DbVendor dbVendor = getDbVendor(connection);
@@ -2659,6 +3179,16 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Deletes all duplicates of a table, so only the first row of each key value remains. The changes are committed.
+	 * Temporary helper columns are added and removed again.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param keyColumns key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @return number of deleted rows
+	 * @throws Exception if the duplicates cannot be deleted (the changes are rolled back then)
+	 */
 	public static int dropDuplicates(final Connection connection, final String tableName, final Collection<String> keyColumns) throws Exception {
 		if (detectDuplicates(connection, tableName, keyColumns) > 0) {
 			final DbVendor dbVendor = getDbVendor(connection);
@@ -2695,6 +3225,19 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Joins all duplicates of a table into the first row of each key value: The duplicates are deleted and their
+	 * values are used to update the remaining row. Temporary helper columns and an interim table are used.
+	 * <p>
+	 * Not supported for Cassandra, which cannot fill the interim table.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param keyColumnsWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @param updateWithNullValues true to also take over NULL values of the duplicates
+	 * @return number of deleted duplicate rows
+	 * @throws Exception if the duplicates cannot be joined
+	 */
 	public static int joinDuplicates(final Connection connection, final String tableName, final Collection<String> keyColumnsWithFunctions, final boolean updateWithNullValues) throws Exception {
 		if (detectDuplicates(connection, tableName, keyColumnsWithFunctions) > 0) {
 			final DbVendor dbVendor = getDbVendor(connection);
@@ -2730,10 +3273,13 @@ public class DbUtilities {
 					connection.rollback();
 					statement.execute("CREATE TABLE " + interimTableName + " AS SELECT * FROM " + tableName + " WHERE " + originalItemIndexColumn + " != " + originalDuplicateIndexColumn);
 				} else if (dbVendor == DbVendor.Firebird) {
-					// There is no "create table as select"-statement in firebird
+					// There is no "create table as select"-statement in firebird, so the table must be created and filled separately
 					createTable(connection, interimTableName, getColumnDataTypes(connection, tableName), null);
+					connection.commit();
+					statement.executeUpdate("INSERT INTO " + interimTableName + " SELECT * FROM " + tableName + " WHERE " + originalItemIndexColumn + " != " + originalDuplicateIndexColumn);
 				} else if (dbVendor == DbVendor.Cassandra) {
 					// There is no "create table as select"-statement in Cassandra
+					// TODO: Cassandra also has no "INSERT INTO ... SELECT", so the interim table stays empty and the duplicate data is not joined
 					createTable(connection, interimTableName, getColumnDataTypes(connection, tableName), getPrimaryKeyColumns(connection, tableName));
 				} else {
 					statement.execute("CREATE TABLE " + interimTableName + " AS SELECT * FROM " + tableName + " WHERE " + originalItemIndexColumn + " != " + originalDuplicateIndexColumn);
@@ -2862,11 +3408,30 @@ public class DbUtilities {
 		return indexColumnName;
 	}
 
+	/**
+	 * Drops a column, if it exists. The change is committed.
+	 * For SQLite versions without "ALTER TABLE ... DROP COLUMN" (before 3.35.0) the table is recreated without the column,
+	 * which only works for simple column definitions.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param columnName name of the column
+	 * @return true if the column was dropped, false if a parameter is null or the column does not exist
+	 * @throws Exception if the column cannot be dropped (the changes are rolled back then)
+	 */
 	public static boolean dropColumnIfExists(final Connection connection, final String tableName, final String columnName) throws Exception {
 		if (connection != null && tableName != null && columnName != null && checkTableAndColumnsExist(connection, tableName, columnName)) {
 			final DbVendor dbVendor = getDbVendor(connection);
 			if (dbVendor == DbVendor.SQLite) {
-				// SQLite cannot drop columns
+				// SQLite supports "ALTER TABLE ... DROP COLUMN" since version 3.35.0
+				try (Statement statement = connection.createStatement()) {
+					statement.execute("ALTER TABLE " + tableName + " DROP COLUMN " + escapeVendorReservedNames(dbVendor, columnName));
+					connection.commit();
+					return true;
+				} catch (@SuppressWarnings("unused") final SQLException e) {
+					// Older SQLite versions cannot drop columns, so the table is recreated without the column
+				}
+
 				try (Statement statement = connection.createStatement()) {
 					final String randomSuffix = "" + new Random().nextInt(100000000);
 
@@ -2879,7 +3444,12 @@ public class DbUtilities {
 						}
 					}
 
-					createTableStatement = createTableStatement.replaceAll(", " + columnName + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?\\)", ")").replaceAll(", " + columnName + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?,", ",");
+					final String originalCreateTableStatement = createTableStatement;
+					createTableStatement = createTableStatement.replaceAll(", " + Pattern.quote(columnName) + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?\\)", ")").replaceAll(", " + Pattern.quote(columnName) + " [a-zA-Z0-9]+(?:\\([0-9]+(?:, ?[0-9]+)?\\))?,", ",");
+					if (createTableStatement.equals(originalCreateTableStatement)) {
+						// The simple column definition pattern did not match (e.g. first column or additional column constraints), so the column would not be dropped
+						throw new Exception("Cannot drop column '" + columnName + "' of SQLite table '" + tableName + "': Unsupported column definition");
+					}
 
 					statement.execute("ALTER TABLE " + tableName + " RENAME TO tmp" + randomSuffix + "_old");
 					statement.execute(createTableStatement);
@@ -2907,6 +3477,14 @@ public class DbUtilities {
 		return false;
 	}
 
+	/**
+	 * Drops a table, if it exists. The change is committed.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return true if the table was dropped, false if a parameter is null or the table does not exist
+	 * @throws Exception if the table cannot be dropped
+	 */
 	public static boolean dropTableIfExists(final Connection connection, final String tableName) throws Exception {
 		if (connection != null && tableName != null && checkTableExist(connection, tableName)) {
 			try (Statement statement = connection.createStatement()) {
@@ -2918,6 +3496,17 @@ public class DbUtilities {
 		return false;
 	}
 
+	/**
+	 * Creates a new empty table with the structure of the given columns of another table.
+	 * All columns except the key columns are made nullable.
+	 *
+	 * @param connection database connection
+	 * @param sourceTableName table to copy the structure from
+	 * @param columnNames columns to copy (all columns for Firebird and Cassandra)
+	 * @param keyColumns key columns, which keep their NOT NULL constraint, may be null
+	 * @param destinationTableName name of the new table
+	 * @throws Exception if the table cannot be created
+	 */
 	public static void copyTableStructure(final Connection connection, final String sourceTableName, final List<String> columnNames, final List<String> keyColumns, final String destinationTableName) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			final DbVendor dbVendor = getDbVendor(connection);
@@ -2941,7 +3530,8 @@ public class DbUtilities {
 				// Make all columns nullable
 				final CaseInsensitiveMap<DbColumnType> columnDataTypes = getColumnDataTypes(connection, destinationTableName);
 				for (final Entry<String, DbColumnType> columnDataType : columnDataTypes.entrySet()) {
-					if (!columnDataType.getValue().isNullable() && (keyColumns == null || !keyColumns.contains(columnDataType.getKey()))) {
+					// The column names of getColumnDataTypes() are lowercased, so the key columns must be compared case-insensitive
+					if (!columnDataType.getValue().isNullable() && (keyColumns == null || !new CaseInsensitiveSet(keyColumns).contains(columnDataType.getKey()))) {
 						String typeString = columnDataType.getValue().getTypeName();
 						if (columnDataType.getValue().getSimpleDataType() == DbSimpleDataType.String) {
 							typeString += "(" + (Long.toString(columnDataType.getValue().getCharacterByteSize())) + ")";
@@ -2975,6 +3565,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates an index with a generated name (at most 30 characters) on a table.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @param columns indexed columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @return name of the created index
+	 * @throws Exception if the index cannot be created
+	 */
 	public static String createIndex(final Connection connection, final String tableName, final List<String> columns) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			final String indexNameSuffix = "_" + new Random().nextInt(100000000) + "_ix";
@@ -2986,6 +3585,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Deletes all rows of a table (without commit).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return number of deleted rows
+	 * @throws Exception if the rows cannot be deleted
+	 */
 	public static int clearTable(final Connection connection, final String tableName) throws Exception {
 		try (Statement statement = connection.createStatement()) {
 			return statement.executeUpdate("DELETE FROM " + tableName);
@@ -2994,6 +3601,18 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Copies all rows of a source table, whose key values do not exist in the destination table yet. The changes are committed.
+	 *
+	 * @param connection database connection
+	 * @param sourceTableName table to copy the rows from
+	 * @param destinationTableName table to insert the rows into
+	 * @param insertColumns columns to copy
+	 * @param keyColumnsWithFunctions key columns, optionally wrapped in a function like {@code LOWER(email)}; if empty, all rows are copied
+	 * @param additionalInsertValues optional additional values as lines "column = SQL value", separated by line breaks or semicolons
+	 * @return number of inserted rows
+	 * @throws Exception if the rows cannot be inserted (the changes are rolled back then)
+	 */
 	public static int insertNotExistingItems(final Connection connection, final String sourceTableName, final String destinationTableName, final List<String> insertColumns, final List<String> keyColumnsWithFunctions, final String additionalInsertValues) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
 		try (Statement statement = connection.createStatement()) {
@@ -3021,6 +3640,19 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Deletes all rows of a temporary table, which would violate a NOT NULL constraint (without default value)
+	 * of the destination table. Empty strings are treated like NULL values.
+	 *
+	 * @param connection database connection
+	 * @param tempTableName temporary table with the new rows
+	 * @param destinationTableName table the rows will be inserted into
+	 * @param columnsToInsert columns which will be inserted, null for all columns
+	 * @param duplicateInDestinationTableColumn optional column of the temporary table, which marks rows already existing
+	 *        in the destination table (value other than 0 or NULL); these rows are not deleted
+	 * @return number of deleted rows
+	 * @throws Exception if the rows cannot be deleted
+	 */
 	public static int removeNewEntriesWithInvalidNullValues(final Connection connection, final String tempTableName, final String destinationTableName, List<String> columnsToInsert, final String duplicateInDestinationTableColumn) throws Exception {
 		if (columnsToInsert != null) {
 			columnsToInsert = columnsToInsert.stream().map(x -> x.toLowerCase()).collect(Collectors.toList());
@@ -3056,10 +3688,36 @@ public class DbUtilities {
 		return removedItems;
 	}
 
+	/**
+	 * Copies all rows of a source table into a destination table. The changes are committed.
+	 *
+	 * @param connection database connection
+	 * @param sourceTableName table to copy the rows from
+	 * @param destinationTableName table to insert the rows into
+	 * @param insertColumns columns to copy
+	 * @param additionalInsertValues optional additional values as lines "column = SQL value", separated by line breaks or semicolons
+	 * @return number of inserted rows
+	 * @throws Exception if the rows cannot be inserted (the changes are rolled back then)
+	 */
 	public static int insertAllItems(final Connection connection, final String sourceTableName, final String destinationTableName, final List<String> insertColumns, final String additionalInsertValues) throws Exception {
 		return insertNotExistingItems(connection, sourceTableName, destinationTableName, insertColumns, null, additionalInsertValues);
 	}
 
+	/**
+	 * Updates all rows of a destination table with the values of the rows with the same key values in a source table.
+	 * If there are several matching source rows, the one with the highest item index is used. The changes are committed.
+	 *
+	 * @param connection database connection
+	 * @param sourceTableName table with the new values
+	 * @param destinationTableName table to update
+	 * @param updateColumns columns to update (key columns are never updated)
+	 * @param keyColumns key columns, optionally wrapped in a function like {@code LOWER(email)}
+	 * @param itemIndexColumn column of the source table with the index of each row
+	 * @param updateWithNullValues true to also take over NULL values, false to keep the existing values instead
+	 * @param additionalUpdateValues optional additional values as lines "column = SQL value", separated by line breaks or semicolons
+	 * @return number of updated rows
+	 * @throws Exception if the key columns are missing or the rows cannot be updated (the changes are rolled back then)
+	 */
 	public static int updateAllExistingItems(final Connection connection, final String sourceTableName, final String destinationTableName, Collection<String> updateColumns, final Collection<String> keyColumns, String itemIndexColumn, final boolean updateWithNullValues, final String additionalUpdateValues) throws Exception {
 		if (keyColumns == null || keyColumns.isEmpty()) {
 			throw new Exception("Missing keycolumns");
@@ -3134,6 +3792,22 @@ public class DbUtilities {
 		return updatedItems;
 	}
 
+	/**
+	 * Updates only the first row of each key value in a destination table with the values of the rows with the same
+	 * key values in a source table. If there are several matching source rows, the one with the highest item index is used.
+	 * The item index column of the source table is overwritten with the index of the matched destination row. The changes are committed.
+	 *
+	 * @param connection database connection
+	 * @param sourceTableName table with the new values
+	 * @param destinationTableName table to update
+	 * @param updateColumns columns to update (key columns are never updated)
+	 * @param keyColumns key columns
+	 * @param itemIndexColumn column of the source table with the index of each row
+	 * @param updateWithNullValues true to also take over NULL values, false to keep the existing values instead
+	 * @param additionalUpdateValues optional additional values as lines "column = SQL value", separated by line breaks or semicolons
+	 * @return number of updated rows
+	 * @throws Exception if the key columns are missing or the rows cannot be updated (the changes are rolled back then)
+	 */
 	public static int updateFirstExistingItems(final Connection connection, final String sourceTableName, final String destinationTableName, Collection<String> updateColumns, final Collection<String> keyColumns, final String itemIndexColumn, final boolean updateWithNullValues, final String additionalUpdateValues) throws Exception {
 		if (keyColumns == null || keyColumns.isEmpty()) {
 			throw new Exception("Missing keycolumns");
@@ -3303,6 +3977,13 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Removes vendor specific quotes from a name (backticks for MySQL and MariaDB, double quotes for Oracle and Derby).
+	 *
+	 * @param dbVendor database vendor
+	 * @param value name, possibly quoted
+	 * @return name without quotes
+	 */
 	public static String unescapeVendorReservedNames(final DbVendor dbVendor, final String value) {
 		if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
 			return Utilities.trimSimultaneously(value, "`");
@@ -3315,6 +3996,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Quotes a name with vendor specific quotes, if it is a reserved word or no plain identifier
+	 * (see {@link #SAFE_IDENTIFIER}). Oracle names are uppercased when quoted.
+	 *
+	 * @param dbVendor database vendor
+	 * @param value name to quote
+	 * @return quoted or unchanged name
+	 */
 	public static String escapeVendorReservedNames(final DbVendor dbVendor, final String value) {
 		if (Utilities.isBlank(value)) {
 			return value;
@@ -3355,15 +4044,40 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Joins column names separated by ", " after quoting them if needed (see {@link #escapeVendorReservedNames(DbVendor, String)}).
+	 * Expressions with brackets like {@code LOWER(email)} are not quoted.
+	 *
+	 * @param dbVendor database vendor
+	 * @param columnNames column names or expressions
+	 * @return joined column names
+	 */
 	public static String joinColumnVendorEscaped(final DbVendor dbVendor, final Collection<String> columnNames) {
 		final StringBuilder returnValue = new StringBuilder();
 		for (final String columnName : columnNames) {
 			if (returnValue.length() > 0) {
 				returnValue.append(", ");
 			}
-			returnValue.append(escapeVendorReservedNames(dbVendor, columnName));
+			returnValue.append(escapeColumnNameOrExpression(dbVendor, columnName));
 		}
 		return returnValue.toString();
+	}
+
+	/**
+	 * Escapes a plain column name if needed (see {@link #escapeVendorReservedNames(DbVendor, String)}), but leaves
+	 * column expressions with functions like {@code LOWER(email)} untouched, because quoting them would turn
+	 * the whole expression into a single (non existing) column name.
+	 *
+	 * @param dbVendor database vendor
+	 * @param columnNameOrExpression plain column name or expression with brackets
+	 * @return escaped column name or the unchanged expression
+	 */
+	private static String escapeColumnNameOrExpression(final DbVendor dbVendor, final String columnNameOrExpression) {
+		if (columnNameOrExpression != null && columnNameOrExpression.contains("(")) {
+			return columnNameOrExpression.trim();
+		} else {
+			return escapeVendorReservedNames(dbVendor, columnNameOrExpression);
+		}
 	}
 
 	/**
@@ -3387,6 +4101,13 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the MySQL server variable "max_allowed_packet".
+	 *
+	 * @param connection MySQL or MariaDB database connection
+	 * @return maximum packet size in bytes, 0 if not available
+	 * @throws Exception if the variable cannot be read
+	 */
 	public static int getMysqlMaxAllowedPacketSize(final Connection connection) throws Exception {
 		try (PreparedStatement preparedStatement = connection.prepareStatement("SHOW VARIABLES like 'max_allowed_packet'");
 				ResultSet resultSet = preparedStatement.executeQuery()) {
@@ -3403,26 +4124,53 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Checks if a String is a simple identifier with 1 to 30 letters, digits or underscores.
+	 *
+	 * @param identifier identifier to check
+	 * @return true if the identifier is valid, false otherwise (also for null)
+	 */
 	public static boolean isValidIdentifier(final String identifier) {
+		if (identifier == null) {
+			return false;
+		}
 		final Pattern pattern = Pattern.compile("[0-9A-Za-z_]{1,30}");
 		return pattern.matcher(identifier).matches();
 	}
 
+	/**
+	 * Checks if a String is a simple alias with 1 to 30 letters, digits or underscores.
+	 *
+	 * @param alias alias to check
+	 * @return true if the alias is valid, false otherwise (also for null)
+	 */
 	public static boolean isValidAlias(final String alias) {
+		if (alias == null) {
+			return false;
+		}
 		final Pattern pattern = Pattern.compile("[0-9A-Za-z_]{1,30}");
 		return pattern.matcher(alias).matches();
 	}
 
+	/**
+	 * Stores the content of a file in a BLOB column. For MySQL and MariaDB the file size is checked against
+	 * the server variable "max_allowed_packet" before.
+	 *
+	 * @param dbDefinition connection parameters
+	 * @param sqlUpdateStatementWithPlaceholder SQL statement with a single placeholder "?" for the file content
+	 * @param filePath path of the file
+	 * @throws Exception if the file is too big for the server or cannot be stored
+	 */
 	public static void updateBlob(final DbConnectionDefinition dbDefinition, final String sqlUpdateStatementWithPlaceholder, final String filePath) throws Exception {
 		try (Connection connection = createConnection(dbDefinition, false)) {
 			if (dbDefinition.getDbVendor() == DbVendor.MySQL) {
 				final long maxPacketSize = getMysqlConnectionNumericVariable(connection, "max_allowed_packet");
-				if (new File(filePath).length() > maxPacketSize) {
+				if (maxPacketSize > 0 && new File(filePath).length() > maxPacketSize) {
 					throw new Exception("File size is too big for current database settings. Please adjust MySQL server variable 'max_allowed_packet' to at least " + new File(filePath).length());
 				}
 			} else if (dbDefinition.getDbVendor() == DbVendor.MariaDB) {
 				final long maxPacketSize = getMariaDBConnectionNumericVariable(connection, "max_allowed_packet");
-				if (new File(filePath).length() > maxPacketSize) {
+				if (maxPacketSize > 0 && new File(filePath).length() > maxPacketSize) {
 					throw new Exception("File size is too big for current database settings. Please adjust MariaDB server variable 'max_allowed_packet' to at least " + new File(filePath).length());
 				}
 			}
@@ -3438,6 +4186,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns a numeric MySQL server variable.
+	 *
+	 * @param connection MySQL database connection
+	 * @param variableName name of the variable
+	 * @return value of the variable, 0 if not available
+	 * @throws SQLException if the variable cannot be read
+	 */
 	public static long getMysqlConnectionNumericVariable(final Connection connection, final String variableName) throws SQLException {
 		try (PreparedStatement preparedStatement = connection.prepareStatement("SHOW VARIABLES WHERE variable_name = ?")) {
 			preparedStatement.setString(1, variableName);
@@ -3445,7 +4201,7 @@ public class DbUtilities {
 				if (resultSet.next()) {
 					final Object value = resultSet.getObject("value");
 					if (value != null) {
-						return Integer.parseInt(value.toString());
+						return Long.parseLong(value.toString());
 					} else {
 						return 0;
 					}
@@ -3456,6 +4212,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns a numeric MariaDB server variable.
+	 *
+	 * @param connection MariaDB database connection
+	 * @param variableName name of the variable
+	 * @return value of the variable, 0 if not available
+	 * @throws SQLException if the variable cannot be read
+	 */
 	public static long getMariaDBConnectionNumericVariable(final Connection connection, final String variableName) throws SQLException {
 		try (PreparedStatement preparedStatement = connection.prepareStatement("SHOW VARIABLES WHERE variable_name = ?")) {
 			preparedStatement.setString(1, variableName);
@@ -3463,7 +4227,7 @@ public class DbUtilities {
 				if (resultSet.next()) {
 					final Object value = resultSet.getObject("value");
 					if (value != null) {
-						return Integer.parseInt(value.toString());
+						return Long.parseLong(value.toString());
 					} else {
 						return 0;
 					}
@@ -3474,6 +4238,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Sets a numeric global MySQL server variable (requires the privilege to set global variables).
+	 *
+	 * @param connection MySQL database connection
+	 * @param variableName name of the variable (concatenated into the statement, must be trusted)
+	 * @param variableValue new value
+	 * @throws SQLException if the variable cannot be set
+	 */
 	public static void setMaysqlDBConnectionNumericVariable(final Connection connection, final String variableName, final long variableValue) throws SQLException {
 		try (PreparedStatement preparedStatement = connection.prepareStatement("SET GLOBAL " + variableName + " = ?")) {
 			preparedStatement.setLong(1, variableValue);
@@ -3481,6 +4253,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Sets a numeric global MariaDB server variable (requires the privilege to set global variables).
+	 *
+	 * @param connection MariaDB database connection
+	 * @param variableName name of the variable (concatenated into the statement, must be trusted)
+	 * @param variableValue new value
+	 * @throws SQLException if the variable cannot be set
+	 */
 	public static void setMariaDBConnectionNumericVariable(final Connection connection, final String variableName, final long variableValue) throws SQLException {
 		try (PreparedStatement preparedStatement = connection.prepareStatement("SET GLOBAL " + variableName + " = ?")) {
 			preparedStatement.setLong(1, variableValue);
@@ -3533,6 +4313,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the storage size of a table. Supported for Oracle (LOB and index segments), MySQL and MariaDB (data length and free space).
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table
+	 * @return storage size in bytes
+	 * @throws Exception if the vendor is not supported or the size cannot be read
+	 */
 	public static long getTableStorageSize(final Connection connection, final String tableName) throws Exception {
 		if (getDbVendor(connection) == DbVendor.Oracle) {
 			final List<String> indexNames = getTableIndexNames(connection, tableName);
@@ -3568,6 +4356,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the names of the indices of a table. Supported for Oracle, MySQL, MariaDB and PostgreSQL.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for PostgreSQL
+	 * @return index names
+	 * @throws Exception if the vendor is not supported or the indices cannot be read
+	 */
 	public static List<String> getTableIndexNames(final Connection connection, final String tableName) throws Exception {
 		if (getDbVendor(connection) == DbVendor.Oracle) {
 			final String query = "SELECT index_name FROM user_ind_columns WHERE LOWER(table_name) = ?";
@@ -3587,7 +4383,11 @@ public class DbUtilities {
 				try (ResultSet resultSet = preparedStatement.executeQuery()) {
 					final List<String> resultList = new ArrayList<>();
 					while (resultSet.next()) {
-						resultList.add(resultSet.getString(1));
+						// Column 1 of "SHOW INDEX" is the table name, the index name is in column "Key_name" (one row per indexed column)
+						final String indexName = resultSet.getString("Key_name");
+						if (!resultList.contains(indexName)) {
+							resultList.add(indexName);
+						}
 					}
 					return resultList;
 				}
@@ -3626,16 +4426,28 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Enables or disables all foreign key constraints. Supported for Oracle (all non system owners, errors of single
+	 * constraints are only printed) and MySQL/MariaDB (FOREIGN_KEY_CHECKS of the session).
+	 *
+	 * @param dbVendor database vendor
+	 * @param connection database connection
+	 * @param activated true to enable, false to disable the constraints
+	 * @throws Exception if the vendor is not supported or some constraints could not be enabled
+	 */
 	public static void setForeignKeyConstraintStatus(final DbVendor dbVendor, final Connection connection, final boolean activated) throws Exception {
 		if (dbVendor == DbVendor.Oracle) {
 			final List<String> sqlListToExecute = new ArrayList<>();
 			try (Statement statement = connection.createStatement()) {
-				try (ResultSet result = statement.executeQuery("SELECT table_name, constraint_name FROM all_constraints WHERE constraint_type = 'R' AND status = '" + (activated ? "DISABLED" : "ENABLED") + "' AND UPPER(owner) NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'SITE_SYS', 'MDSYS')")) {
+				try (ResultSet result = statement.executeQuery("SELECT owner, table_name, constraint_name FROM all_constraints WHERE constraint_type = 'R' AND status = '" + (activated ? "DISABLED" : "ENABLED") + "' AND UPPER(owner) NOT IN ('SYS', 'SYSTEM', 'CTXSYS', 'SITE_SYS', 'MDSYS')")) {
 					while (result.next()) {
+						final String owner = result.getString("owner");
 						final String tableName = result.getString("table_name");
 						final String constraintName = result.getString("constraint_name");
 
-						sqlListToExecute.add("ALTER TABLE " + tableName + " " + (activated ? "ENABLE" : "DISABLE") + " CONSTRAINT " + constraintName);
+						// all_constraints also contains tables of other owners, so the table name must be qualified by its owner.
+						// Dictionary names are stored exactly, so they are quoted to also support mixed case names.
+						sqlListToExecute.add("ALTER TABLE \"" + owner + "\".\"" + tableName + "\" " + (activated ? "ENABLE" : "DISABLE") + " CONSTRAINT \"" + constraintName + "\"");
 					}
 				}
 
@@ -3674,6 +4486,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Enables or disables all triggers of the current Oracle user. Errors of single triggers are only printed.
+	 *
+	 * @param dbVendor database vendor (only Oracle is supported)
+	 * @param connection database connection
+	 * @param activated true to enable, false to disable the triggers
+	 * @throws Exception if the vendor is not supported or some triggers could not be enabled
+	 */
 	public static void setTriggerStatus(final DbVendor dbVendor, final Connection connection, final boolean activated) throws Exception {
 		if (dbVendor == DbVendor.Oracle) {
 			final List<String> sqlListToExecute = new ArrayList<>();
@@ -3712,6 +4532,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Creates a statement for reading large result sets. For MySQL the rows are streamed one by one,
+	 * for other vendors a fetch size of 100 is used.
+	 *
+	 * @param connection database connection
+	 * @return new statement, to be closed by the caller
+	 * @throws Exception if the statement cannot be created
+	 */
 	public static Statement getStatementForLargeQuery(final Connection connection) throws Exception {
 		final DbVendor dbVendor = getDbVendor(connection);
 		if (DbVendor.MySQL == dbVendor) {
@@ -3725,6 +4553,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the foreign keys of a table via JDBC metadata, one entry per foreign key column. All names are lowercased.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix
+	 * @return foreign key column references, null if the table name is blank
+	 * @throws Exception if the foreign keys cannot be read
+	 */
 	public static List<DatabaseForeignKey> getForeignKeys(final Connection connection, String tableName) throws Exception {
 		if (Utilities.isBlank(tableName)) {
 			return null;
@@ -3766,6 +4602,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the constraints of a table. Supported for Oracle (primary key, unique, foreign key and check constraints
+	 * with their columns), MySQL, MariaDB (with check conditions) and PostgreSQL. All names are lowercased.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for MySQL, MariaDB and PostgreSQL
+	 * @return constraints, null if the table name is blank or the vendor is not supported
+	 * @throws Exception if the constraints cannot be read
+	 */
 	public static List<DatabaseConstraint> getConstraints(final Connection connection, String tableName) throws Exception {
 		if (Utilities.isBlank(tableName)) {
 			return null;
@@ -3780,7 +4625,7 @@ public class DbUtilities {
 					try (PreparedStatement preparedStatement = connection.prepareStatement(
 							"SELECT user_constraints.constraint_name, user_constraints.constraint_type, user_cons_columns.column_name"
 									+ " FROM user_constraints JOIN user_cons_columns ON user_constraints.constraint_name = user_cons_columns.constraint_name AND user_constraints.table_name = user_cons_columns.table_name"
-									+ " WHERE user_constraints.table_name = ? ORDER BY user_constraints.constraint_name")) {
+									+ " WHERE user_constraints.table_name = ? AND user_constraints.constraint_type IN ('P', 'U', 'R', 'C') ORDER BY user_constraints.constraint_name")) {
 						preparedStatement.setNString(1, tableName);
 						try (ResultSet resultSet = preparedStatement.executeQuery()) {
 							final List<DatabaseConstraint> returnList = new ArrayList<>();
@@ -3807,7 +4652,7 @@ public class DbUtilities {
 
 					final List<DatabaseConstraint> returnList = new ArrayList<>();
 					try (PreparedStatement preparedStatement = connection.prepareStatement("SELECT constraint_name, constraint_type FROM information_schema.table_constraints"
-							+ " WHERE " + (schemaName != null ? "LOWER(table_schema) = LOWER(?) AND " : "") + "table_name = ? ORDER BY constraint_name")) {
+							+ " WHERE " + (schemaName != null ? "LOWER(table_schema) = LOWER(?)" : "table_schema = DATABASE()") + " AND table_name = ? ORDER BY constraint_name")) {
 						if (schemaName == null) {
 							preparedStatement.setNString(1, tableNameWithoutSchema);
 						} else {
@@ -3824,8 +4669,10 @@ public class DbUtilities {
 						}
 					}
 
-					try (PreparedStatement preparedStatement = connection.prepareStatement("SELECT constraint_name, check_clause FROM information_schema.check_constraints"
-							+ " WHERE " + (schemaName != null ? "LOWER(table_schema) = LOWER(?) AND " : "") + "table_name = ?")) {
+					// information_schema.check_constraints of MySQL has no table_name/table_schema columns, so it is joined with table_constraints
+					try (PreparedStatement preparedStatement = connection.prepareStatement("SELECT cc.constraint_name, cc.check_clause FROM information_schema.check_constraints cc"
+							+ " JOIN information_schema.table_constraints tc ON tc.constraint_schema = cc.constraint_schema AND tc.constraint_name = cc.constraint_name"
+							+ " WHERE " + (schemaName != null ? "LOWER(tc.table_schema) = LOWER(?)" : "tc.table_schema = DATABASE()") + " AND tc.table_name = ?")) {
 						if (schemaName == null) {
 							preparedStatement.setNString(1, tableNameWithoutSchema);
 						} else {
@@ -3889,6 +4736,15 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Returns the indices of a table with their columns. Supported for Oracle, MySQL, MariaDB and PostgreSQL.
+	 * All names are lowercased, an index named "primary" is listed first.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix for PostgreSQL
+	 * @return indices, null if the table name is blank or the vendor is not supported
+	 * @throws Exception if the indices cannot be read
+	 */
 	public static List<DatabaseIndex> getIndices(final Connection connection, String tableName) throws Exception {
 		if (Utilities.isBlank(tableName)) {
 			return null;
@@ -4003,6 +4859,14 @@ public class DbUtilities {
 		}
 	}
 
+	/**
+	 * Checks if a schema exists. Supported for MySQL, MariaDB and PostgreSQL.
+	 *
+	 * @param connection database connection
+	 * @param schemaName name of the schema
+	 * @return true if the schema exists, false if not or if the name is blank
+	 * @throws Exception if the vendor is not supported or the schemas cannot be read
+	 */
 	public static boolean checkSchemaExist(final Connection connection, final String schemaName) throws Exception {
 		if (Utilities.isBlank(schemaName)) {
 			return false;

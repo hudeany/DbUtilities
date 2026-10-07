@@ -4,31 +4,66 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Generic String keyed Map that ignores the String case
+ * Generic String keyed Map that ignores the String case and keeps the insertion order of the keys.
+ * Keys are stored lowercased, so iterating the keys returns the lowercased variants.
+ *
+ * @param <V> type of the values
  */
 public class CaseInsensitiveLinkedMap<V> extends AbstractLinkedHashMap<String, V> {
 	private static final long serialVersionUID = 6204601427841356043L;
 
+	/**
+	 * Creates a new empty map.
+	 *
+	 * @param <V> type of the values
+	 * @return new empty map
+	 */
 	public static <V> CaseInsensitiveLinkedMap<V> create() {
 		return new CaseInsensitiveLinkedMap<>();
 	}
 
+	/**
+	 * Creates a new empty map with default initial capacity and load factor.
+	 */
 	public CaseInsensitiveLinkedMap() {
 		super();
 	}
 
+	/**
+	 * Creates a new empty map.
+	 *
+	 * @param initialCapacity initial capacity
+	 * @param loadFactor load factor
+	 * @param accessOrder true for access order, false for insertion order
+	 */
 	public CaseInsensitiveLinkedMap(final int initialCapacity, final float loadFactor, final boolean accessOrder) {
 		super(initialCapacity, loadFactor, accessOrder);
 	}
 
+	/**
+	 * Creates a new empty map.
+	 *
+	 * @param initialCapacity initial capacity
+	 * @param loadFactor load factor
+	 */
 	public CaseInsensitiveLinkedMap(final int initialCapacity, final float loadFactor) {
 		super(initialCapacity, loadFactor);
 	}
 
+	/**
+	 * Creates a new empty map with default load factor.
+	 *
+	 * @param initialCapacity initial capacity
+	 */
 	public CaseInsensitiveLinkedMap(final int initialCapacity) {
 		super(initialCapacity);
 	}
 
+	/**
+	 * Creates a new map containing all entries of the given map. The keys are converted on insertion.
+	 *
+	 * @param map entries to copy
+	 */
 	public CaseInsensitiveLinkedMap(final Map<? extends String, ? extends V> map) {
 		super(map.size());
 		putAll(map);

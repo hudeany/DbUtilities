@@ -47,6 +47,13 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * </ul>
  */
 public class SqlDdlMigrationGenerator {
+	/**
+	 * Creates a new generator instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public SqlDdlMigrationGenerator() {
+		// Only static methods
+	}
+
 	private static class MigrationStatistics {
 		int schemasCreated          = 0;
 		int schemasDropped          = 0;
@@ -151,7 +158,14 @@ public class SqlDdlMigrationGenerator {
 	}
 
 	/**
-	 * Convenience overload without sorting.
+	 * Computes the structural diff of both DDL streams and writes the migration script without sorting.
+	 * Convenience overload of {@link #diff(InputStream, InputStream, OutputStream, boolean, boolean, boolean)}.
+	 *
+	 * @param sourceSqlData      current database structure as SQL DDL stream
+	 * @param destinationSqlData desired database structure as SQL DDL stream
+	 * @param diffSqlData        output stream for the migration script
+	 * @throws IOException          on read / write errors
+	 * @throws DbStructureException if either file contains structural errors
 	 */
 	public static void diff(final InputStream sourceSqlData, final InputStream destinationSqlData,
 			final OutputStream diffSqlData) throws IOException, DbStructureException {
@@ -304,8 +318,8 @@ public class SqlDdlMigrationGenerator {
 			}
 		}
 
-		if (!Objects.equals(source.getSchemaComment(), destination.getSchemaComment())
-				&& destination.getSchemaComment() != null) {
+		// A removed comment is reset by "IS NULL"
+		if (!Objects.equals(source.getSchemaComment(), destination.getSchemaComment())) {
 			statements.add("COMMENT ON SCHEMA " + quote(schemaName)
 					+ " IS " + sqlString(destination.getSchemaComment()) + ";");
 			stats.commentsChanged++;
@@ -363,8 +377,8 @@ public class SqlDdlMigrationGenerator {
 
 		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys(), stats));
 
-		if (!Objects.equals(source.getTableComment(), destination.getTableComment())
-				&& destination.getTableComment() != null) {
+		// A removed comment is reset by "IS NULL"
+		if (!Objects.equals(source.getTableComment(), destination.getTableComment())) {
 			statements.add("COMMENT ON TABLE " + qualifiedTable
 					+ " IS " + sqlString(destination.getTableComment()) + ";");
 			stats.commentsChanged++;
@@ -408,13 +422,13 @@ public class SqlDdlMigrationGenerator {
 						+ " ALTER COLUMN " + colName + " DROP DEFAULT;");
 			} else {
 				statements.add("ALTER TABLE " + qualifiedTable
-						+ " ALTER COLUMN " + colName + " SET DEFAULT " + dstType.getDefaultValue() + ";");
+						+ " ALTER COLUMN " + colName + " SET DEFAULT " + sqlDefaultValue(dstType) + ";");
 			}
 			stats.columnsDefaultChanged++;
 		}
 
-		if (!Objects.equals(source.getColumnComment(), destination.getColumnComment())
-				&& destination.getColumnComment() != null) {
+		// A removed comment is reset by "IS NULL"
+		if (!Objects.equals(source.getColumnComment(), destination.getColumnComment())) {
 			statements.add("COMMENT ON COLUMN " + qualifiedTable + "." + colName
 					+ " IS " + sqlString(destination.getColumnComment()) + ";");
 			stats.columnsCommentChanged++;
@@ -592,7 +606,7 @@ public class SqlDdlMigrationGenerator {
 				sb.append(" NOT NULL");
 			}
 			if (t.getDefaultValue() != null) {
-				sb.append(" DEFAULT ").append(t.getDefaultValue());
+				sb.append(" DEFAULT ").append(sqlDefaultValue(t));
 			}
 		}
 		return sb.toString();
@@ -604,7 +618,8 @@ public class SqlDdlMigrationGenerator {
 
 		switch (simple) {
 			case String:
-				return base + "(" + t.getCharacterByteSize() + ")";
+				// Types without length (e.g. PostgreSQL "VARCHAR" or "TEXT"-like types) must not get a "(0)"
+				return t.getCharacterByteSize() > 0 ? base + "(" + t.getCharacterByteSize() + ")" : base;
 			case Float:
 				if (t.getNumericPrecision() > 0) {
 					return base + "(" + t.getNumericPrecision() + ", " + t.getNumericScale() + ")";
@@ -628,7 +643,7 @@ public class SqlDdlMigrationGenerator {
 			sb.append("CONSTRAINT ").append(quote(fk.getForeignKeyName())).append(' ');
 		}
 		sb.append("FOREIGN KEY (").append(quoteList(fk.getColumnNames())).append(')');
-		sb.append(" REFERENCES ").append(quote(fk.getReferencedTableName()));
+		sb.append(" REFERENCES ").append(quoteQualified(fk.getReferencedTableName()));
 		if (fk.getReferencedColumnNames() != null && !fk.getReferencedColumnNames().isEmpty()) {
 			sb.append(" (").append(quoteList(fk.getReferencedColumnNames())).append(')');
 		}
@@ -661,6 +676,48 @@ public class SqlDdlMigrationGenerator {
 				&& Objects.equals(a.getReferencedTableName(), b.getReferencedTableName())
 				&& Objects.equals(normalizeList(a.getReferencedColumnNames()),
 						normalizeList(b.getReferencedColumnNames()));
+	}
+
+	/**
+	 * Formats the default value of a column for a DDL statement. The parser stores string literals without
+	 * their quotes, so values that are no number, boolean, NULL or SQL expression are quoted again.
+	 *
+	 * @param columnType column type with the default value
+	 * @return SQL representation of the default value
+	 */
+	private static String sqlDefaultValue(final DbColumnType columnType) {
+		final String value = columnType.getDefaultValue().trim();
+		final DbSimpleDataType simple = columnType.getSimpleDataType();
+		final boolean isNull = "NULL".equalsIgnoreCase(value);
+		final boolean isQuoted = value.length() >= 2 && value.startsWith("'") && value.endsWith("'");
+		final boolean isExpression = value.contains("(") || value.contains("::")
+				|| value.matches("(?i)CURRENT_\\w*|LOCALTIME|LOCALTIMESTAMP|SYSDATE|SYSTIMESTAMP|USER|SESSION_USER|SYSTEM_USER");
+		final boolean isNumeric = value.matches("[-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?");
+		final boolean isBoolean = "TRUE".equalsIgnoreCase(value) || "FALSE".equalsIgnoreCase(value);
+		if (isNull || isQuoted || isExpression) {
+			return value;
+		} else if (simple != DbSimpleDataType.String && simple != DbSimpleDataType.Clob && (isNumeric || isBoolean)) {
+			return value;
+		} else {
+			return sqlString(value);
+		}
+	}
+
+	/**
+	 * Quotes a table name that may be qualified by a schema name ("schema.table"), part by part.
+	 *
+	 * @param name table name with optional schema prefix
+	 * @return quoted table name
+	 */
+	private static String quoteQualified(final String name) {
+		if (name == null) {
+			return null;
+		}
+		final int dot = name.lastIndexOf('.');
+		if (dot > 0) {
+			return quote(name.substring(0, dot)) + "." + quote(name.substring(dot + 1));
+		}
+		return quote(name);
 	}
 
 	private static String quote(final String name) {

@@ -2,19 +2,38 @@ package de.soderer.utilities.sql;
 
 import de.soderer.utilities.db.utilities.Utilities;
 
+/**
+ * Formats a {@link SelectStatement} as SQL text.
+ */
 public class SelectStatementFormatter {
 	private final String indentation;
 	private final String lineBreak;
 
+	/**
+	 * Creates a new formatter using tab indentation and "\n" line breaks.
+	 */
 	public SelectStatementFormatter() {
 		this("\t", "\n");
 	}
 
+	/**
+	 * Creates a new formatter.
+	 * If indentation and line break are both empty, the statement is formatted as single line.
+	 *
+	 * @param indentation indentation string, e.g. "\t"
+	 * @param lineBreak line break string, e.g. "\n"
+	 */
 	public SelectStatementFormatter(final String indentation, final String lineBreak) {
 		this.indentation = indentation;
 		this.lineBreak = lineBreak;
 	}
 
+	/**
+	 * Formats a SELECT statement.
+	 *
+	 * @param selectStatement statement to format
+	 * @return SQL text of the statement
+	 */
 	public String format(final SelectStatement selectStatement) {
 		if (Utilities.isEmpty(indentation) && Utilities.isEmpty(lineBreak)) {
 			final StringBuilder returnValue = new StringBuilder();
@@ -35,6 +54,7 @@ public class SelectStatementFormatter {
 			returnValue.append(" FROM ");
 			returnValue.append(Utilities.join(selectStatement.getFromTables(), ","));
 			if (selectStatement.getJoinClauses() != null && selectStatement.getJoinClauses().size() > 0) {
+				returnValue.append(" ");
 				returnValue.append(Utilities.join(selectStatement.getJoinClauses(), " "));
 			}
 			if (Utilities.isNotBlank(selectStatement.getWhereClause())) {
@@ -50,7 +70,7 @@ public class SelectStatementFormatter {
 				returnValue.append(selectStatement.getHavingClause());
 			}
 			if (selectStatement.getOrderBy() != null && selectStatement.getOrderBy().size() > 0) {
-				returnValue.append(" SORT BY ");
+				returnValue.append(" ORDER BY ");
 				returnValue.append(Utilities.join(selectStatement.getOrderBy(), ", "));
 			}
 			return returnValue.toString();
@@ -60,7 +80,7 @@ public class SelectStatementFormatter {
 				returnValue.append("WITH");
 				returnValue.append(lineBreak);
 				returnValue.append(indentation);
-				returnValue.append(Utilities.join(selectStatement.getWithClauses(), ",\n" + indentation));
+				returnValue.append(Utilities.join(selectStatement.getWithClauses(), "," + lineBreak + indentation));
 				returnValue.append(lineBreak);
 			}
 			returnValue.append("SELECT");
@@ -102,7 +122,7 @@ public class SelectStatementFormatter {
 			}
 			if (selectStatement.getOrderBy() != null && selectStatement.getOrderBy().size() > 0) {
 				returnValue.append(lineBreak);
-				returnValue.append("SORT BY");
+				returnValue.append("ORDER BY");
 				returnValue.append(lineBreak);
 				returnValue.append(indentation);
 				returnValue.append(Utilities.join(selectStatement.getOrderBy(), "," + lineBreak + indentation));
@@ -114,7 +134,8 @@ public class SelectStatementFormatter {
 	private String format(final NamedExpression namedFieldDefinition) {
 		String expressionString;
 		if (namedFieldDefinition.getExpression() instanceof SelectStatement) {
-			expressionString = format((SelectStatement) namedFieldDefinition.getExpression());
+			// A subselect used as field must be enclosed in brackets
+			expressionString = "(" + format((SelectStatement) namedFieldDefinition.getExpression()) + ")";
 		} else {
 			expressionString = (String) namedFieldDefinition.getExpression();
 		}

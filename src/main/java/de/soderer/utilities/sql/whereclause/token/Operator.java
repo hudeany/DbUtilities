@@ -1,8 +1,19 @@
 package de.soderer.utilities.sql.whereclause.token;
 
+/**
+ * Operator or function name of a where clause, e.g. "=", "and", "like" or "to_date".
+ */
 public class Operator extends RulePart {
+	/**
+	 * Lowercased sign of the operator.
+	 */
 	public String sign;
 
+	/**
+	 * Creates a new operator.
+	 *
+	 * @param sign sign of the operator (stored lowercased)
+	 */
 	public Operator(String sign) {
 		if (sign != null) {
 			this.sign = sign.toLowerCase();

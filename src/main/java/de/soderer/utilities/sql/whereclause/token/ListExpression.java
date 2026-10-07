@@ -6,13 +6,36 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * Boolean list check like {@code value in (1, 2, 3)} or {@code value not in (...)}.
+ */
 public class ListExpression extends Value {
+	/**
+	 * Signs of the list operators.
+	 */
 	public static final Set<String> SIGNS = new HashSet<>(Arrays.asList(new String[] { "in", "not in" }));
 
+	/**
+	 * Checked value.
+	 */
 	public Value value;
+	/**
+	 * List operator ("in" or "not in").
+	 */
 	public Operator operator;
+	/**
+	 * Values of the list.
+	 */
 	public List<Value> valueList = new ArrayList<>();
 
+	/**
+	 * Creates a new list check.
+	 *
+	 * @param value checked value
+	 * @param operator list operator ("in" or "not in")
+	 * @param values values of the list, must have the type of the checked value or be subselects
+	 * @throws IllegalArgumentException if a list value has a different type
+	 */
 	public ListExpression(Value value, Operator operator, List<Value> values) {
 		type = Type.Bool;
 		this.value = value;

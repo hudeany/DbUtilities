@@ -38,6 +38,21 @@ import de.soderer.utilities.sql.whereclause.token.Value.Type;
  * </ul>
  */
 public class ReducedSqlWhereClauseParser {
+	/**
+	 * Creates a new parser instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public ReducedSqlWhereClauseParser() {
+		// Only static methods
+	}
+
+	/**
+	 * Parses a where clause into a tree of rule parts.
+	 *
+	 * @param formula where clause without the keyword WHERE, e.g. {@code age >= 18 and lower(name) like 'a%'}
+	 * @param descriptors names (case-insensitive) and types of the fields that may be used in the formula
+	 * @return root of the parsed expression tree, a {@link Value} of type {@link Value.Type#Bool}
+	 * @throws IllegalArgumentException if the formula is invalid or contains unknown fields
+	 */
 	public static RulePart parse(final String formula, final Map<String, Value.Type> descriptors) {
 		final Map<String, Value.Type> fieldDescriptors = new HashMap<>();
 		for (final String value : descriptors.keySet()) {
@@ -278,7 +293,7 @@ public class ReducedSqlWhereClauseParser {
 						changed = true;
 					}
 				} else if (ListExpression.SIGNS.contains(operator.sign)) {
-					if (i - 1 < 0 || !(parts.get(i - 1) instanceof Value) || !(parts.get(i + 1) instanceof SupplementalPart)
+					if (i - 1 < 0 || i + 1 >= parts.size() || !(parts.get(i - 1) instanceof Value) || !(parts.get(i + 1) instanceof SupplementalPart)
 							|| ((SupplementalPart) parts.get(i + 1)).type != SupplementalPart.Type.OpeningBracket) {
 						throw new IllegalArgumentException("Invalid definition for list operator: " + operator.sign);
 					} else {
@@ -304,6 +319,7 @@ public class ReducedSqlWhereClauseParser {
 							}
 							parts.remove(i);
 							parts.set(i - 1, newValue);
+							changed = true;
 						}
 					}
 				}
@@ -316,7 +332,7 @@ public class ReducedSqlWhereClauseParser {
 		boolean changed = false;
 		for (int i = parts.size() - 1; i >= 0; i--) {
 			if (parts.get(i) instanceof SupplementalPart && ((SupplementalPart) parts.get(i)).type == SupplementalPart.Type.OpeningBracket) {
-				if (i + 1 < parts.size() && parts.get(i) instanceof SupplementalPart && ((SupplementalPart) parts.get(i)).type == SupplementalPart.Type.ClosingBracket) {
+				if (i + 1 < parts.size() && parts.get(i + 1) instanceof SupplementalPart && ((SupplementalPart) parts.get(i + 1)).type == SupplementalPart.Type.ClosingBracket) {
 					parts.remove(i + 1);
 					parts.remove(i);
 					changed = true;

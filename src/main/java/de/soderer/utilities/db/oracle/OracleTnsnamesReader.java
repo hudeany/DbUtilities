@@ -17,7 +17,14 @@ import de.soderer.utilities.db.utilities.MultiValueCaseInsensitiveOrderedMap;
 import de.soderer.utilities.db.utilities.Tuple;
 import de.soderer.utilities.db.utilities.Utilities;
 
+/**
+ * Reader for Oracle tnsnames.ora files.
+ * Lines starting with "#" are treated as comments. Each reader instance can read its data only once.
+ */
 public class OracleTnsnamesReader implements Closeable {
+	/**
+	 * Example of a tnsnames.ora entry with all supported elements.
+	 */
 	public static final String EXAMPLE =
 			"TNSNAME=\n"
 					+ "\t(DESCRIPTION=\n"
@@ -43,10 +50,26 @@ public class OracleTnsnamesReader implements Closeable {
 
 	private PushbackReader inputReader = null;
 
+	/** True while only whitespace was read since the last line break, so a "#" starts a comment line. */
+	private boolean atLineStart = true;
+
+	/**
+	 * Creates a new reader for UTF-8 encoded data.
+	 *
+	 * @param inputStream data to read, closed by {@link #close()} or after {@link #read()}
+	 * @throws Exception if the input stream is null
+	 */
 	public OracleTnsnamesReader(final InputStream inputStream) throws Exception {
 		this(inputStream, StandardCharsets.UTF_8);
 	}
 
+	/**
+	 * Creates a new reader.
+	 *
+	 * @param inputStream data to read, closed by {@link #close()} or after {@link #read()}
+	 * @param encodingCharset encoding of the data
+	 * @throws Exception if the input stream is null
+	 */
 	public OracleTnsnamesReader(final InputStream inputStream, final Charset encodingCharset) throws Exception {
 		if (inputStream == null) {
 			throw new IllegalStateException("InputStream is missing");
@@ -67,11 +90,23 @@ public class OracleTnsnamesReader implements Closeable {
 	}
 
 	private Character readNextCharacter() throws IOException {
-		final int nextInt = inputReader.read();
+		int nextInt = inputReader.read();
+		// Lines starting with "#" are comments in tnsnames.ora and are skipped up to the line break
+		while (nextInt == '#' && atLineStart) {
+			while (nextInt != -1 && nextInt != '\n') {
+				nextInt = inputReader.read();
+			}
+		}
 		if (nextInt == -1) {
 			return null;
 		} else {
-			return (char) nextInt;
+			final char nextChar = (char) nextInt;
+			if (nextChar == '\n') {
+				atLineStart = true;
+			} else if (!Character.isWhitespace(nextChar)) {
+				atLineStart = false;
+			}
+			return nextChar;
 		}
 	}
 
@@ -100,6 +135,12 @@ public class OracleTnsnamesReader implements Closeable {
 		return textBuilder.toString().trim();
 	}
 
+	/**
+	 * Reads all entries of the tnsnames.ora data and closes the input stream.
+	 *
+	 * @return entries by their case-insensitive TNS names, or null if there is no entry
+	 * @throws Exception if the data was already read, is invalid or contains duplicate TNS names
+	 */
 	public Map<String, OracleTnsMapValue> read() throws Exception {
 		if (inputReader == null) {
 			throw new Exception("OracleTnsnamesReader position was already initialized for other read operation");
@@ -172,6 +213,14 @@ public class OracleTnsnamesReader implements Closeable {
 		}
 	}
 
+	/**
+	 * Formats a TNS entry value as single line, e.g. for use in a JDBC url like
+	 * {@code jdbc:oracle:thin:@(DESCRIPTION=...)}.
+	 *
+	 * @param tnsEntryData value of a TNS entry
+	 * @return single line representation of the value
+	 * @throws Exception if the value has an unknown type
+	 */
 	public static String getSingleLineFormatedTnsEntryData(final OracleTnsValue tnsEntryData) throws Exception {
 		if (tnsEntryData instanceof OracleTnsMapValue) {
 			String returnValue = "";
@@ -205,6 +254,13 @@ public class OracleTnsnamesReader implements Closeable {
 		}
 	}
 
+	/**
+	 * Formats TNS entries as multi line tnsnames.ora text with tab indentation.
+	 *
+	 * @param tnsnamesData entries by their TNS names
+	 * @return formatted tnsnames.ora text
+	 * @throws Exception if a value has an unknown type
+	 */
 	public static String format(final Map<String, OracleTnsMapValue> tnsnamesData) throws Exception {
 		String returnValue = "";
 		for (final Entry<String, OracleTnsMapValue> tnsNamesEntry : tnsnamesData.entrySet()) {

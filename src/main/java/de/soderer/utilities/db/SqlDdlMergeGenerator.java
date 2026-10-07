@@ -40,9 +40,15 @@ import de.soderer.utilities.db.exception.DbStructureException;
  *     </ul>
  *   </li>
  * </ul>
- * }</pre>
  */
 public class SqlDdlMergeGenerator {
+	/**
+	 * Creates a new generator instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public SqlDdlMergeGenerator() {
+		// Only static methods
+	}
+
 	private static class MergeStatistics {
 		// Schemas
 		int schemasOnlyInA  = 0;
@@ -184,7 +190,14 @@ public class SqlDdlMergeGenerator {
 	}
 
 	/**
-	 * Convenience overload without sorting.
+	 * Parses both DDL streams, merges their structures and writes the merged DDL without sorting.
+	 * Convenience overload of {@link #merge(InputStream, InputStream, OutputStream, boolean, boolean, boolean)}.
+	 *
+	 * @param structureSqlDataA first SQL DDL input stream
+	 * @param structureSqlDataB second SQL DDL input stream (wins on conflicts)
+	 * @param mergeSqlData      output stream for the merged DDL
+	 * @throws IOException          on read / write errors
+	 * @throws DbStructureException if either file contains structural errors
 	 */
 	public static void merge(final InputStream structureSqlDataA, final InputStream structureSqlDataB, final OutputStream mergeSqlData) throws IOException, DbStructureException {
 		merge(structureSqlDataA, structureSqlDataB, mergeSqlData, false, false, false);
@@ -293,7 +306,12 @@ public class SqlDdlMergeGenerator {
 			}
 		} else if (base.getSchemaComment() != null) {
 			result.setSchemaComment(base.getSchemaComment());
-			stats.commentsFromA++;
+			// "base" is schema B, if the schema only exists in structure B
+			if (schemaA != null) {
+				stats.commentsFromA++;
+			} else {
+				stats.commentsFromB++;
+			}
 		}
 
 		if (other == null) {
@@ -542,7 +560,7 @@ public class SqlDdlMergeGenerator {
 				sb.append(" NOT NULL");
 			}
 			if (t.getDefaultValue() != null) {
-				sb.append(" DEFAULT ").append(t.getDefaultValue());
+				sb.append(" DEFAULT ").append(sqlDefaultValue(t));
 			}
 		}
 		return sb.toString();
@@ -553,7 +571,8 @@ public class SqlDdlMergeGenerator {
 		final String base = t.getTypeName();
 		switch (simple) {
 			case String:
-				return base + "(" + t.getCharacterByteSize() + ")";
+				// Types without length (e.g. PostgreSQL "VARCHAR" or "TEXT"-like types) must not get a "(0)"
+				return t.getCharacterByteSize() > 0 ? base + "(" + t.getCharacterByteSize() + ")" : base;
 			case Float:
 				if (t.getNumericPrecision() > 0) {
 					return base + "(" + t.getNumericPrecision() + ", " + t.getNumericScale() + ")";
@@ -577,11 +596,53 @@ public class SqlDdlMergeGenerator {
 			sb.append("CONSTRAINT ").append(quote(fk.getForeignKeyName())).append(' ');
 		}
 		sb.append("FOREIGN KEY (").append(quoteList(fk.getColumnNames())).append(')');
-		sb.append(" REFERENCES ").append(quote(fk.getReferencedTableName()));
+		sb.append(" REFERENCES ").append(quoteQualified(fk.getReferencedTableName()));
 		if (fk.getReferencedColumnNames() != null && !fk.getReferencedColumnNames().isEmpty()) {
 			sb.append(" (").append(quoteList(fk.getReferencedColumnNames())).append(')');
 		}
 		return sb.toString();
+	}
+
+	/**
+	 * Formats the default value of a column for a DDL statement. The parser stores string literals without
+	 * their quotes, so values that are no number, boolean, NULL or SQL expression are quoted again.
+	 *
+	 * @param columnType column type with the default value
+	 * @return SQL representation of the default value
+	 */
+	private static String sqlDefaultValue(final DbColumnType columnType) {
+		final String value = columnType.getDefaultValue().trim();
+		final DbSimpleDataType simple = columnType.getSimpleDataType();
+		final boolean isNull = "NULL".equalsIgnoreCase(value);
+		final boolean isQuoted = value.length() >= 2 && value.startsWith("'") && value.endsWith("'");
+		final boolean isExpression = value.contains("(") || value.contains("::")
+				|| value.matches("(?i)CURRENT_\\w*|LOCALTIME|LOCALTIMESTAMP|SYSDATE|SYSTIMESTAMP|USER|SESSION_USER|SYSTEM_USER");
+		final boolean isNumeric = value.matches("[-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?");
+		final boolean isBoolean = "TRUE".equalsIgnoreCase(value) || "FALSE".equalsIgnoreCase(value);
+		if (isNull || isQuoted || isExpression) {
+			return value;
+		} else if (simple != DbSimpleDataType.String && simple != DbSimpleDataType.Clob && (isNumeric || isBoolean)) {
+			return value;
+		} else {
+			return sqlString(value);
+		}
+	}
+
+	/**
+	 * Quotes a table name that may be qualified by a schema name ("schema.table"), part by part.
+	 *
+	 * @param name table name with optional schema prefix
+	 * @return quoted table name
+	 */
+	private static String quoteQualified(final String name) {
+		if (name == null) {
+			return null;
+		}
+		final int dot = name.lastIndexOf('.');
+		if (dot > 0) {
+			return quote(name.substring(0, dot)) + "." + quote(name.substring(dot + 1));
+		}
+		return quote(name);
 	}
 
 	private static String quote(final String name) {

@@ -29,39 +29,103 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
+/**
+ * General helper methods for strings, collections, files, dates and network connections used by the database utilities.
+ */
 public class Utilities {
+	/**
+	 * Creates a new instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public Utilities() {
+		// Only static methods
+	}
+
+	/**
+	 * Checks if a String is null or has length 0.
+	 *
+	 * @param value value to check
+	 * @return true if the value is null or empty
+	 */
 	public static boolean isEmpty(final String value) {
 		return value == null || value.length() == 0;
 	}
 
+	/**
+	 * Checks if a String is not null and has a length greater than 0.
+	 *
+	 * @param value value to check
+	 * @return true if the value is not empty
+	 */
 	public static boolean isNotEmpty(final String value) {
 		return !isEmpty(value);
 	}
 
+	/**
+	 * Checks if a collection is null or has no items.
+	 *
+	 * @param collection collection to check
+	 * @return true if the collection is null or empty
+	 */
 	public static boolean isEmpty(final Collection<?> collection) {
 		return collection == null || collection.isEmpty();
 	}
 
+	/**
+	 * Checks if a collection is not null and has at least one item.
+	 *
+	 * @param collection collection to check
+	 * @return true if the collection is not empty
+	 */
 	public static boolean isNotEmpty(final Collection<?> collection) {
 		return !isEmpty(collection);
 	}
 
+	/**
+	 * Checks if a String is null, empty or contains only whitespace.
+	 *
+	 * @param value value to check
+	 * @return true if the value is blank
+	 */
 	public static boolean isBlank(final String value) {
 		return value == null || value.length() == 0 || value.trim().length() == 0;
 	}
 
+	/**
+	 * Checks if a String contains at least one non whitespace character.
+	 *
+	 * @param value value to check
+	 * @return true if the value is not blank
+	 */
 	public static boolean isNotBlank(final String value) {
 		return !isBlank(value);
 	}
 
+	/**
+	 * Checks if a char array is null or has length 0.
+	 *
+	 * @param value value to check
+	 * @return true if the value is null or empty
+	 */
 	public static boolean isEmpty(final char[] value) {
 		return value == null || value.length == 0;
 	}
 
+	/**
+	 * Checks if a char array is not null and has a length greater than 0.
+	 *
+	 * @param value value to check
+	 * @return true if the value is not empty
+	 */
 	public static boolean isNotEmpty(final char[] value) {
 		return !isEmpty(value);
 	}
 
+	/**
+	 * Checks if a char array is null, empty or contains only whitespace.
+	 *
+	 * @param value value to check
+	 * @return true if the value is blank
+	 */
 	public static boolean isBlank(final char[] value) {
 		if (value == null || value.length == 0) {
 			return true;
@@ -75,18 +139,46 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Checks if a char array contains at least one non whitespace character.
+	 *
+	 * @param value value to check
+	 * @return true if the value is not blank
+	 */
 	public static boolean isNotBlank(final char[] value) {
 		return !isBlank(value);
 	}
 
+	/**
+	 * Repeats a character.
+	 *
+	 * @param valueChar character to repeat
+	 * @param count number of repetitions
+	 * @return String of the repeated character
+	 */
 	public static String repeat(final char valueChar, final int count) {
 		return repeat(Character.toString(valueChar), count, null);
 	}
 
+	/**
+	 * Repeats a String without separator.
+	 *
+	 * @param value String to repeat
+	 * @param count number of repetitions
+	 * @return repeated String, or null if value is null
+	 */
 	public static String repeat(final String value, final int count) {
 		return repeat(value, count, null);
 	}
 
+	/**
+	 * Repeats a String with an optional separator between the repetitions.
+	 *
+	 * @param value String to repeat
+	 * @param count number of repetitions
+	 * @param separatorString separator between the repetitions, may be null
+	 * @return repeated String, or null if value is null
+	 */
 	public static String repeat(final String value, final int count, final String separatorString) {
 		if (value == null) {
 			return null;
@@ -104,6 +196,13 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Joins the characters of an array.
+	 *
+	 * @param array characters to join
+	 * @param glue separator between the characters, may be null
+	 * @return joined String, or null if the array is null
+	 */
 	public static String join(final char[] array, String glue) {
 		if (array == null) {
 			return null;
@@ -127,6 +226,13 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Joins the String representations of an array. Null items are represented as empty String.
+	 *
+	 * @param array items to join
+	 * @param glue separator between the items, may be null
+	 * @return joined String, or null if the array is null
+	 */
 	public static String join(final Object[] array, String glue) {
 		if (array == null) {
 			return null;
@@ -153,6 +259,13 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Joins the String representations of an Iterable. Null items are represented as empty String.
+	 *
+	 * @param iterableObject items to join
+	 * @param glue separator between the items, may be null
+	 * @return joined String, or null if the iterable is null
+	 */
 	public static String join(final Iterable<?> iterableObject, String glue) {
 		if (iterableObject == null) {
 			return null;
@@ -177,6 +290,12 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Replaces a leading "~" and the placeholders "${HOME}" and "$HOME" by the user's home directory.
+	 *
+	 * @param filePath file path to process
+	 * @return file path with replaced home directory, or null if filePath is null
+	 */
 	public static String replaceUsersHome(String filePath) {
 		if (filePath == null) {
 			return filePath;
@@ -210,6 +329,12 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Null safe variant of {@link String#trim()}.
+	 *
+	 * @param value value to trim
+	 * @return trimmed value, or null if value is null
+	 */
 	public static String trim(final String value) {
 		if (value == null) {
 			return null;
@@ -218,6 +343,13 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Removes all occurrences of a character from the start and the end of a String.
+	 *
+	 * @param value value to trim
+	 * @param trimChar character to remove
+	 * @return trimmed value, or null if value is null
+	 */
 	public static String trim(String value, final char trimChar) {
 		while (value != null && value.startsWith(Character.toString(trimChar))) {
 			value = value.substring(1);
@@ -284,6 +416,14 @@ public class Utilities {
 		return list;
 	}
 
+	/**
+	 * Splits a String at the separator characters, ignoring separators within single or double quoted parts.
+	 * The parts are trimmed, empty parts are omitted.
+	 *
+	 * @param stringList String to split
+	 * @param separatorChars separator characters
+	 * @return trimmed non empty parts
+	 */
 	public static List<String> splitAndTrimListQuoted(final String stringList, final char... separatorChars) {
 		final List<String> returnList = new ArrayList<>();
 		StringBuilder nextLine = new StringBuilder();
@@ -328,6 +468,14 @@ public class Utilities {
 		return returnList;
 	}
 
+	/**
+	 * Shortens a String to a maximum length by cutting it at the right end.
+	 *
+	 * @param value value to shorten
+	 * @param maxLength maximum length of the result including the cut sign
+	 * @param cutSign sign appended to shortened values (e.g. "..."), may be null
+	 * @return shortened value, or the unchanged value if it is not longer than maxLength
+	 */
 	public static String shortenStringToMaxLengthCutRight(final String value, final int maxLength, final String cutSign) {
 		if (value != null && value.length() > maxLength) {
 			final int cutSignLength = cutSign == null ? 0 : cutSign.length();
@@ -378,6 +526,12 @@ public class Utilities {
 		return files;
 	}
 
+	/**
+	 * Deletes a file or a directory with all its content.
+	 *
+	 * @param file file or directory to delete
+	 * @return true if everything was deleted, false if something could not be deleted
+	 */
 	public static boolean delete(final File file) {
 		if (file.isDirectory()) {
 			// listFiles() returns null if the directory cannot be read, so its content cannot be deleted either
@@ -394,6 +548,19 @@ public class Utilities {
 		return file.delete();
 	}
 
+	/**
+	 * Creates a truststore file containing the TLS server certificate of a host ("trust on first use").
+	 * <p>
+	 * Watch out: The certificate is accepted without any validation, so this offers no protection against
+	 * a man-in-the-middle at the time of the creation.
+	 *
+	 * @param hostnameOrIpAndPort hostname or IP with optional port, e.g. "dbserver:2484"
+	 * @param defaultPort port used if hostnameOrIpAndPort contains no port
+	 * @param trustStoreFile file to create, must not exist
+	 * @param trustStorePassword password of the truststore, may be null for an empty password
+	 * @param proxy proxy for the connection, may be null for a direct connection
+	 * @throws Exception if the file already exists, the port is invalid or the certificate cannot be read
+	 */
 	public static void createTrustStoreFile(final String hostnameOrIpAndPort, final int defaultPort, final File trustStoreFile, final char[] trustStorePassword, final Proxy proxy) throws Exception {
 		if (trustStoreFile.exists()) {
 			throw new Exception("File '" + trustStoreFile.getAbsolutePath() + "' already exists");
@@ -430,6 +597,16 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Reads the TLS server certificate of a host without validating it.
+	 * The first certificate with subject alternative names is preferred.
+	 *
+	 * @param hostnameOrIp hostname or IP
+	 * @param port TLS port
+	 * @param proxy proxy for the connection, may be null for a direct connection
+	 * @return server certificate, or null if the server sent no X.509 certificate
+	 * @throws Exception if the connection fails
+	 */
 	public static X509Certificate getServerTlsCertificate(final String hostnameOrIp, final int port, final Proxy proxy) throws Exception {
 		final HttpsURLConnection urlConnection = (HttpsURLConnection) URI.create("https://" + hostnameOrIp + ":" + port).toURL().openConnection(proxy == null ? Proxy.NO_PROXY : proxy);
 		final SSLContext sslContext = SSLContext.getInstance("TLS");
@@ -462,6 +639,13 @@ public class Utilities {
 		return null;
 	}
 
+	/**
+	 * Creates a trust manager accepting all certificates.
+	 * <p>
+	 * Watch out: Only use it to read untrusted certificates, never for connections transferring sensitive data.
+	 *
+	 * @return trust manager accepting all certificates
+	 */
 	public static X509TrustManager createTrustAllTrustManager() {
 		return new X509TrustManager() {
 			@Override
@@ -481,6 +665,14 @@ public class Utilities {
 		};
 	}
 
+	/**
+	 * Tests whether a TCP connection to a host and port can be established within 2 seconds.
+	 *
+	 * @param hostname hostname or IP
+	 * @param port TCP port
+	 * @return true if the connection was established
+	 * @throws Exception if the hostname cannot be resolved or the connection fails
+	 */
 	public static boolean testConnection(final String hostname, final int port) throws Exception {
 		try (Socket socket = new Socket()) {
 			final InetSocketAddress endPoint = new InetSocketAddress(hostname, port);
@@ -498,6 +690,13 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Checks if a String ends with a suffix, ignoring the case.
+	 *
+	 * @param data String to check
+	 * @param suffix expected suffix
+	 * @return true if data ends with suffix (also true if both are null or suffix is null)
+	 */
 	public static boolean endsWithIgnoreCase(final String data, final String suffix) {
 		if (data == suffix) {
 			// both null or same object
@@ -517,12 +716,28 @@ public class Utilities {
 		}
 	}
 
+	/**
+	 * Parses a date String.
+	 *
+	 * @param dateFormatPattern {@link DateTimeFormatter} pattern
+	 * @param dateString date String
+	 * @return parsed date
+	 * @throws java.time.format.DateTimeParseException if the date String does not match the pattern
+	 */
 	public static LocalDate parseLocalDate(final String dateFormatPattern, final String dateString) {
 		final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(dateFormatPattern);
 		final LocalDate localDate = LocalDate.parse(dateString, dateTimeFormatter);
 		return localDate;
 	}
 
+	/**
+	 * Parses a date time String.
+	 *
+	 * @param dateTimeFormatPattern {@link DateTimeFormatter} pattern
+	 * @param dateTimeString date time String
+	 * @return parsed date time
+	 * @throws java.time.format.DateTimeParseException if the date time String does not match the pattern
+	 */
 	public static LocalDateTime parseLocalDateTime(final String dateTimeFormatPattern, final String dateTimeString) {
 		final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(dateTimeFormatPattern);
 		final LocalDateTime localDateTime = LocalDateTime.parse(dateTimeString, dateTimeFormatter);

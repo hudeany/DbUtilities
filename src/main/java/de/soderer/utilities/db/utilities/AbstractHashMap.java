@@ -19,22 +19,44 @@ import java.util.function.Function;
  * silently fail to remove an entry that is actually stored under the converted key "foo", even though
  * {@code caseInsensitiveMap.remove("FOO")} works correctly. Iterating via {@link java.util.Iterator} and
  * calling {@code Iterator.remove()} is unaffected, since that always operates on the key as already stored.
+ *
+ * @param <K> type of the keys
+ * @param <V> type of the values
  */
 public abstract class AbstractHashMap<K, V> extends HashMap<K, V> {
 	private static final long serialVersionUID = 868647429993685054L;
 
+	/**
+	 * Creates a new empty map with default initial capacity and load factor.
+	 */
 	public AbstractHashMap() {
 		super();
 	}
 
+	/**
+	 * Creates a new empty map.
+	 *
+	 * @param initialCapacity initial capacity
+	 * @param loadFactor load factor
+	 */
 	public AbstractHashMap(final int initialCapacity, final float loadFactor) {
 		super(initialCapacity, loadFactor);
 	}
 
+	/**
+	 * Creates a new empty map with default load factor.
+	 *
+	 * @param initialCapacity initial capacity
+	 */
 	public AbstractHashMap(final int initialCapacity) {
 		super(initialCapacity);
 	}
 
+	/**
+	 * Creates a new map containing all entries of the given map. The keys are converted on insertion.
+	 *
+	 * @param map entries to copy
+	 */
 	public AbstractHashMap(final Map<? extends K, ? extends V> map) {
 		super(map.size());
 		putAll(map);
@@ -134,5 +156,11 @@ public abstract class AbstractHashMap<K, V> extends HashMap<K, V> {
 		return super.compute(convertKey(key), remappingFunction);
 	}
 
+	/**
+	 * Converts a key before it is stored or looked up, e.g. by lowercasing it.
+	 *
+	 * @param key key as given by the caller (may be null or of any type)
+	 * @return converted key used internally
+	 */
 	protected abstract K convertKey(Object key);
 }

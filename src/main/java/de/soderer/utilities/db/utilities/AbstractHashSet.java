@@ -4,21 +4,46 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 
+/**
+ * Base class for HashSet variants that transform their items on the way in and out via {@link #convertItem(Object)}
+ * (e.g. case-insensitive lookup by lowercasing String items).
+ *
+ * @param <V> type of the items
+ */
 public abstract class AbstractHashSet<V> extends HashSet<V> {
 	private static final long serialVersionUID = -8774751629113337123L;
 
+	/**
+	 * Creates a new empty set with default initial capacity and load factor.
+	 */
 	public AbstractHashSet() {
 		super();
 	}
 
+	/**
+	 * Creates a new empty set.
+	 *
+	 * @param initialCapacity initial capacity
+	 * @param loadFactor load factor
+	 */
 	public AbstractHashSet(final int initialCapacity, final float loadFactor) {
 		super(initialCapacity, loadFactor);
 	}
 
+	/**
+	 * Creates a new empty set with default load factor.
+	 *
+	 * @param initialCapacity initial capacity
+	 */
 	public AbstractHashSet(final int initialCapacity) {
 		super(initialCapacity);
 	}
 
+	/**
+	 * Creates a new set containing all items of the given collection. The items are converted on insertion.
+	 *
+	 * @param collection items to add
+	 */
 	public AbstractHashSet(final Collection<? extends V> collection) {
 		super(collection.size());
 		addAll(collection);
@@ -86,5 +111,11 @@ public abstract class AbstractHashSet<V> extends HashSet<V> {
 		return result;
 	}
 
+	/**
+	 * Converts an item before it is stored or looked up, e.g. by lowercasing it.
+	 *
+	 * @param item item as given by the caller (may be null or of any type)
+	 * @return converted item used internally
+	 */
 	protected abstract V convertItem(Object item);
 }

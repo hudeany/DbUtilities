@@ -100,6 +100,20 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * before parsing.
  */
 public class SqlDdlParser {
+	/**
+	 * Regex part matching a column type: type name (optionally followed by VARYING or PRECISION), optional
+	 * length or precision and scale (optionally with Oracle CHAR/BYTE semantics) and optional time zone suffix.
+	 */
+	private static final String TYPE_PATTERN_PART = "[\\w]+(?:\\s+(?:VARYING|PRECISION)\\b)?"
+			+ "(?:\\s*\\(\\s*\\d+(?:\\s*,\\s*\\d+)?(?:\\s+(?:CHAR|BYTE))?\\s*\\))?"
+			+ "(?:\\s+(?:WITH|WITHOUT)\\s+(?:LOCAL\\s+)?TIME\\s+ZONE\\b)?";
+
+	/**
+	 * Creates a new parser instance. All methods are static, so this is only needed for compatibility.
+	 */
+	public SqlDdlParser() {
+		// Only static methods
+	}
 
 	// -------------------------------------------------------------------------
 	// Public API
@@ -176,21 +190,29 @@ public class SqlDdlParser {
 			return;
 		}
 
-		// CREATE [OR REPLACE] TABLE [IF NOT EXISTS] [schema.]table ( … ) [COMMENT [=]
-		// 'text']
+		// CREATE [OR REPLACE] TABLE [IF NOT EXISTS] [schema.]table ( … ) [table options] [COMMENT [=] 'text']
 		final Pattern tableHeader = Pattern
 				.compile("(?i)CREATE\\s+(?:OR\\s+REPLACE\\s+)?TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?"
-						+ "([\\w\"`.]+(?:\\.[\\w\"`.]+)?)\\s*\\((.+)\\)"
-						+ "(?:[^']*COMMENT\\s*=?\\s*'((?:[^']|'')*)')?\\s*;?$", Pattern.DOTALL);
+						+ "([\\w\"`.]+(?:\\.[\\w\"`.]+)?)\\s*\\(", Pattern.DOTALL);
 
 		final Matcher m = tableHeader.matcher(stmt);
 		if (!m.find()) {
 			return;
 		}
 
+		// The column block ends at the matching closing bracket. Any trailing table options (e.g. MySQL
+		// "ENGINE=InnoDB DEFAULT CHARSET=utf8", Oracle "TABLESPACE users") are allowed after it.
+		final int columnBlockStart = m.end();
+		final int columnBlockEnd = findMatchingClosingBracket(stmt, columnBlockStart - 1);
+		if (columnBlockEnd < 0) {
+			return;
+		}
+
 		final String fullTableName = m.group(1);
-		final String columnBlock = m.group(2);
-		final String mysqlTableComment = m.group(3) != null ? unescapeSqlString(m.group(3)) : null;
+		final String columnBlock = stmt.substring(columnBlockStart, columnBlockEnd);
+		final String tableOptions = stmt.substring(columnBlockEnd + 1);
+		final Matcher tableCommentMatcher = Pattern.compile("(?i)\\bCOMMENT\\s*=?\\s*'((?:[^']|'')*)'").matcher(tableOptions);
+		final String mysqlTableComment = tableCommentMatcher.find() ? unescapeSqlString(tableCommentMatcher.group(1)) : null;
 
 		// Split schema.table
 		final String schemaName;
@@ -361,7 +383,12 @@ public class SqlDdlParser {
 			final String bodyUpper = body.toUpperCase();
 
 			// Strip optional leading COLUMN keyword for column definitions
-			final String colBody = bodyUpper.startsWith("COLUMN") ? body.substring(6).trim() : body;
+			String colBody = bodyUpper.startsWith("COLUMN") ? body.substring(6).trim() : body;
+			// Strip optional "IF NOT EXISTS" (PostgreSQL / MariaDB)
+			final boolean ifNotExists = colBody.toUpperCase().matches("(?s)^IF\\s+NOT\\s+EXISTS\\s.*");
+			if (ifNotExists) {
+				colBody = colBody.replaceFirst("(?i)^IF\\s+NOT\\s+EXISTS\\s+", "");
+			}
 			final String colBodyUpper = colBody.toUpperCase();
 
 			if (colBodyUpper.startsWith("PRIMARY KEY") || colBodyUpper.startsWith("CONSTRAINT")) {
@@ -419,6 +446,9 @@ public class SqlDdlParser {
 			final LinkedHashMap<String, List<String>> dummyUq = new LinkedHashMap<>();
 			final DbColumn col = parseColumnDefinition(colBody, tableName, dummyPk, dummyUq);
 			if (col != null) {
+				if (ifNotExists && table.getColumns().containsKey(col.getColumnName())) {
+					return;
+				}
 				table.createColumn(col.getColumnName(), col);
 				if (!dummyPk.isEmpty()) {
 					table.setPrimaryKey(dummyPk);
@@ -436,8 +466,16 @@ public class SqlDdlParser {
 			final String bodyUpper = body.toUpperCase();
 
 			if (bodyUpper.startsWith("COLUMN")) {
-				final String colName = unquote(body.substring(6).trim().split("\\s+")[0]);
-				table.dropColumn(colName);
+				String columnPart = body.substring(6).trim();
+				// Optional "IF EXISTS" (PostgreSQL / MariaDB)
+				final boolean ifExists = columnPart.toUpperCase().matches("(?s)^IF\\s+EXISTS\\s.*");
+				if (ifExists) {
+					columnPart = columnPart.replaceFirst("(?i)^IF\\s+EXISTS\\s+", "");
+				}
+				final String colName = unquote(columnPart.split("\\s+")[0]);
+				if (!ifExists || table.getColumns().containsKey(colName)) {
+					table.dropColumn(colName);
+				}
 
 			} else if (bodyUpper.startsWith("PRIMARY KEY")) {
 				table.setPrimaryKey(null);
@@ -467,6 +505,12 @@ public class SqlDdlParser {
 				final int skip = bodyUpper.startsWith("INDEX") ? 5 : 3;
 				final String name = unquote(body.substring(skip).trim().split("\\s+")[0]);
 				table.getUniqueKeys().remove(name);
+			} else if (!body.isEmpty()) {
+				// DROP col (the COLUMN keyword is optional in MySQL / Oracle style)
+				final String colName = unquote(body.split("\\s+")[0]);
+				if (table.getColumns().containsKey(colName)) {
+					table.dropColumn(colName);
+				}
 			}
 			// DROP CHECK, DROP DEFAULT, … silently ignored
 			return;
@@ -641,8 +685,10 @@ public class SqlDdlParser {
 		// The type parameter must be followed by whitespace, comma, or end-of-string
 		// so that DEFAULT(...) is never mistaken for a type parameter.
 		// Group 3: everything after the type
+		// Multi-word types like "CHARACTER VARYING(255)", "DOUBLE PRECISION" or "TIMESTAMP(6) WITH TIME ZONE"
+		// and Oracle length semantics like "VARCHAR2(20 CHAR)" are part of the type.
 		final Pattern colPat = Pattern.compile(
-				"(?i)^([\\w\"`.]+)\\s+([\\w]+(?:\\s*\\(\\s*\\d+(?:\\s*,\\s*\\d+)?\\s*\\))?)(.*)$", Pattern.DOTALL);
+				"(?i)^([\\w\"`.]+)\\s+(" + TYPE_PATTERN_PART + ")(.*)$", Pattern.DOTALL);
 		final Matcher m = colPat.matcher(entry.trim());
 		if (!m.find()) {
 			return null;
@@ -651,7 +697,8 @@ public class SqlDdlParser {
 		final String columnName = unquote(m.group(1));
 		final String typeStr = m.group(2).trim();
 		final String restOrig = m.group(3); // original case – needed for string values
-		final String rest = restOrig.toUpperCase();
+		// Keywords are only searched outside of string literals (e.g. not within COMMENT 'must be NOT NULL')
+		final String rest = removeStringLiterals(restOrig).toUpperCase();
 
 		// --- nullable ---
 		final boolean nullable = !rest.contains("NOT NULL");
@@ -704,7 +751,9 @@ public class SqlDdlParser {
 
 	private static DbColumnType parseColumnType(final String typeStr, final boolean nullable,
 			final boolean autoIncrement, final String defaultValue) {
-		final Pattern typePat = Pattern.compile("(?i)^([\\w]+)(?:\\s*\\(\\s*(\\d+)(?:\\s*,\\s*(\\d+))?\\s*\\))?$");
+		final Pattern typePat = Pattern.compile("(?i)^([\\w]+(?:\\s+(?:VARYING|PRECISION))?)"
+				+ "(?:\\s*\\(\\s*(\\d+)(?:\\s*,\\s*(\\d+))?(?:\\s+(?:CHAR|BYTE))?\\s*\\))?"
+				+ "(\\s+(?:WITH|WITHOUT)\\s+(?:LOCAL\\s+)?TIME\\s+ZONE)?$");
 		final Matcher m = typePat.matcher(typeStr.trim());
 
 		if (!m.find()) {
@@ -712,7 +761,8 @@ public class SqlDdlParser {
 			return new DbColumnType(typeStr.trim(), 0, 0, 0, nullable, autoIncrement, defaultValue);
 		}
 
-		final String typeName = m.group(1);
+		// Normalize the whitespace of multi-word type names, e.g. "TIMESTAMP WITH TIME ZONE"
+		final String typeName = (m.group(1) + (m.group(4) != null ? m.group(4) : "")).replaceAll("\\s+", " ");
 
 		// Determine the type category from the type name alone (character sizes/
 		// numeric precision have no influence on this), then assign the captured
@@ -1117,6 +1167,57 @@ public class SqlDdlParser {
 	// Small utilities
 	// -------------------------------------------------------------------------
 
+	/**
+	 * Returns the position of the closing bracket matching the opening bracket at {@code openingBracketIndex},
+	 * ignoring brackets within string literals.
+	 *
+	 * @param text text to search in
+	 * @param openingBracketIndex position of the opening bracket
+	 * @return position of the matching closing bracket or -1 if there is none
+	 */
+	private static int findMatchingClosingBracket(final String text, final int openingBracketIndex) {
+		int depth = 0;
+		boolean inSingleQuote = false;
+		for (int i = openingBracketIndex; i < text.length(); i++) {
+			final char c = text.charAt(i);
+			if (c == '\'') {
+				inSingleQuote = !inSingleQuote;
+			} else if (!inSingleQuote && c == '(') {
+				depth++;
+			} else if (!inSingleQuote && c == ')') {
+				depth--;
+				if (depth == 0) {
+					return i;
+				}
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Replaces the content of all string literals (including their quotes) by a single blank, so keyword
+	 * checks are not fooled by text within literals like {@code COMMENT 'must be NOT NULL'}.
+	 *
+	 * @param text text to process
+	 * @return text without string literals
+	 */
+	private static String removeStringLiterals(final String text) {
+		final StringBuilder result = new StringBuilder(text.length());
+		boolean inSingleQuote = false;
+		for (int i = 0; i < text.length(); i++) {
+			final char c = text.charAt(i);
+			if (c == '\'') {
+				if (inSingleQuote) {
+					result.append(' ');
+				}
+				inSingleQuote = !inSingleQuote;
+			} else if (!inSingleQuote) {
+				result.append(c);
+			}
+		}
+		return result.toString();
+	}
+
 	/** Strips surrounding backticks, double-quotes, or square brackets. */
 	private static String unquote(final String s) {
 		if (s == null || s.length() < 2) {
@@ -1217,7 +1318,9 @@ public class SqlDdlParser {
 			if (i + 7 <= len && rest.regionMatches(true, i, "DEFAULT", 0, 7)) {
 				final boolean wordBefore = i == 0 || !Character.isLetterOrDigit(rest.charAt(i - 1));
 				final boolean wordAfter  = i + 7 >= len || !Character.isLetterOrDigit(rest.charAt(i + 7));
-				if (wordBefore && wordAfter) {
+				// "GENERATED BY DEFAULT AS IDENTITY" is no default value
+				final boolean precededByBy = rest.substring(0, i).trim().toUpperCase().matches("(?s).*\\bBY$");
+				if (wordBefore && wordAfter && !precededByBy) {
 					i += 7; // skip "DEFAULT"
 					break;
 				}

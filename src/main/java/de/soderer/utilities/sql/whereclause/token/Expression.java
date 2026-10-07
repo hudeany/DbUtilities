@@ -6,35 +6,90 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * Expression of a where clause: a function call, an infix operation or a unary postfix operation.
+ */
 public class Expression extends Value {
+	/**
+	 * Names of the current date value.
+	 */
 	public static final Set<String> SYSDATE_VALUES = new HashSet<>(Arrays.asList(new String[] { "sysdate", "sysdate()" }));
 
+	/**
+	 * String functions with a single parameter.
+	 */
 	public static final Set<String> SINGLE_PARAMETER_STRING_FUNCTION_SIGNS = new HashSet<>(Arrays.asList(new String[] { "lower", "upper" }));
 
+	/**
+	 * Functions converting a string to a date (with format parameter).
+	 */
 	public static final Set<String> DATE_FUNCTION_SIGNS = new HashSet<>(Arrays.asList(new String[] { "date", "to_date", "str_to_date" }));
 
+	/**
+	 * Functions converting a date to a string (with format parameter).
+	 */
 	public static final Set<String> CHAR_FUNCTION_SIGNS = new HashSet<>(Arrays.asList(new String[] { "char", "to_char", "date_format" }));
 
+	/**
+	 * Unary postfix operators with boolean result.
+	 */
 	public static final Set<String> BOOL_UNARY_POSTFIX_OPERATOR_SIGNS = new HashSet<>(Arrays.asList(new String[] { "is null", "is not null" }));
 
+	/**
+	 * SQL modulo function name.
+	 */
 	public static final String MOD_FUNCTION_SIGN = "mod";
+	/**
+	 * BeanShell (Java) modulo operator.
+	 */
 	public static final String BEANSHELL_MOD_SIGN = "%";
 
+	/**
+	 * Comparison operators.
+	 */
 	public static final Set<String> COMPARE_OPERATOR_SIGNS = new HashSet<>(Arrays.asList(new String[] { "<", "<=", "=", "!=", "<>", ">=", ">" }));
 
+	/**
+	 * Arithmetic operators.
+	 */
 	public static final Set<String> CALCULATION_OPERATOR_SIGNS = new HashSet<>(Arrays.asList(new String[] { "-", "+" }));
 
+	/**
+	 * Comparison operators only allowed for strings.
+	 */
 	public static final Set<String> STRING_ONLY_COMPARE_OPERATOR_SIGNS = new HashSet<>(Arrays.asList(new String[] { "like", "not like" }));
 
+	/**
+	 * Boolean operators ordered by ascending priority.
+	 */
 	public static final List<String> BOOL_ONLY_OPERATOR_SIGNS = new ArrayList<>(Arrays.asList(new String[] { "or", // lower arithmetic priority
 			"and" // higher arithmetic priority
 	}));
 
+	/**
+	 * Function of a function call, null for operations.
+	 */
 	public Operator functionOperator;
+	/**
+	 * First operand or function parameter.
+	 */
 	public Value value1;
+	/**
+	 * Infix or unary postfix operator, null for function calls.
+	 */
 	public Operator infixOperator;
+	/**
+	 * Second operand or function parameter, null for unary operations and single parameter functions.
+	 */
 	public Value value2;
 
+	/**
+	 * Creates a unary postfix operation like {@code value is null}.
+	 *
+	 * @param value operand
+	 * @param unaryPostfixOperator postfix operator
+	 * @throws IllegalArgumentException if the operator is no unary postfix operator
+	 */
 	public Expression(Value value, Operator unaryPostfixOperator) {
 		if (BOOL_UNARY_POSTFIX_OPERATOR_SIGNS.contains(unaryPostfixOperator.sign)) {
 			type = Type.Bool;
@@ -45,6 +100,14 @@ public class Expression extends Value {
 		}
 	}
 
+	/**
+	 * Creates an infix operation like {@code value1 = value2}.
+	 *
+	 * @param value1 first operand
+	 * @param infixOperator infix operator
+	 * @param value2 second operand
+	 * @throws IllegalArgumentException if the operator is unknown or the operand types do not fit
+	 */
 	public Expression(Value value1, Operator infixOperator, Value value2) {
 		if (!COMPARE_OPERATOR_SIGNS.contains(infixOperator.sign) && !CALCULATION_OPERATOR_SIGNS.contains(infixOperator.sign) && !STRING_ONLY_COMPARE_OPERATOR_SIGNS.contains(infixOperator.sign)
 				&& !BOOL_ONLY_OPERATOR_SIGNS.contains(infixOperator.sign)) {
@@ -67,6 +130,13 @@ public class Expression extends Value {
 		}
 	}
 
+	/**
+	 * Creates a single parameter function call like {@code lower(value1)}.
+	 *
+	 * @param functionOperator function
+	 * @param value1 function parameter
+	 * @throws IllegalArgumentException if the function is unknown or the parameter type does not fit
+	 */
 	public Expression(Operator functionOperator, Value value1) {
 		if (!SINGLE_PARAMETER_STRING_FUNCTION_SIGNS.contains(functionOperator.sign)) {
 			throw new IllegalArgumentException("Invalid operator: " + functionOperator.sign);
@@ -79,6 +149,14 @@ public class Expression extends Value {
 		}
 	}
 
+	/**
+	 * Creates a two parameter function call like {@code to_date(value1, value2)} or {@code mod(value1, value2)}.
+	 *
+	 * @param functionOperator function
+	 * @param value1 first function parameter
+	 * @param value2 second function parameter
+	 * @throws IllegalArgumentException if the function is unknown or the parameter types do not fit
+	 */
 	public Expression(Operator functionOperator, Value value1, Value value2) {
 		if (!DATE_FUNCTION_SIGNS.contains(functionOperator.sign) && !CHAR_FUNCTION_SIGNS.contains(functionOperator.sign) && !MOD_FUNCTION_SIGN.equals(functionOperator.sign)) {
 			throw new IllegalArgumentException("Invalid operator: " + functionOperator.sign);
@@ -141,8 +219,11 @@ public class Expression extends Value {
 			returnValue.append(functionOperator.toString());
 			returnValue.append("(");
 			returnValue.append(value1.toString());
-			returnValue.append(", ");
-			returnValue.append(value2.toString());
+			// Single parameter functions like lower() and upper() have no second value
+			if (value2 != null) {
+				returnValue.append(", ");
+				returnValue.append(value2.toString());
+			}
 			returnValue.append(")");
 		}
 
@@ -188,11 +269,14 @@ public class Expression extends Value {
 			returnValue.append(functionOperator.toString(stringType));
 			returnValue.append("(");
 			returnValue.append(value1.toString(stringType));
-			returnValue.append(", ");
-			if (stringType == StringType.MySQL) {
-				returnValue.append(value2.toString(stringType).replace("dd", "%d").replace("mm", "%m").replace("yyyy", "%Y").replace("yy", "%y"));
-			} else {
-				returnValue.append(value2.toString(stringType));
+			// Single parameter functions like lower() and upper() have no second value
+			if (value2 != null) {
+				returnValue.append(", ");
+				if (stringType == StringType.MySQL) {
+					returnValue.append(value2.toString(stringType).replace("dd", "%d").replace("mm", "%m").replace("yyyy", "%Y").replace("yy", "%y"));
+				} else {
+					returnValue.append(value2.toString(stringType));
+				}
 			}
 			returnValue.append(")");
 		}

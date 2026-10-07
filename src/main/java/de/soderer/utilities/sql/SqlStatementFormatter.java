@@ -8,10 +8,14 @@ import de.soderer.utilities.db.DbUtilities;
 import de.soderer.utilities.db.data.DbVendor;
 import de.soderer.utilities.db.utilities.CaseInsensitiveSet;
 
+/**
+ * Formats SQL statement text by uppercasing reserved words, inserting line breaks and indenting
+ * the clauses (SELECT, FROM, WHERE, JOIN, CASE, ...).
+ */
 public class SqlStatementFormatter {
 	/**
-	 * Oracle misses "dual" as preserved word
-	 * MySQL and MariaDB miss "max" and "min" as preserved words
+	 * Additional words to be uppercased, which are missing in the vendors' reserved word lists:
+	 * Oracle misses "dual", MySQL and MariaDB miss "max" and "min".
 	 */
 	public static final CaseInsensitiveSet ADDITIONALLY_RESERVED_WORDS_FOR_FORMATING = new CaseInsensitiveSet(new String[] { "dual", "max", "min", "count", "case" });
 
@@ -26,10 +30,21 @@ public class SqlStatementFormatter {
 	private String indentation;
 	private String lineBreak;
 
+	/**
+	 * Creates a new formatter for Oracle SQL using tab indentation and "\n" line breaks.
+	 */
 	public SqlStatementFormatter() {
 		this(DbVendor.Oracle, "\t", "\n");
 	}
 
+	/**
+	 * Creates a new formatter.
+	 * If indentation and line break are both empty, the statement is formatted as single line.
+	 *
+	 * @param dbVendor database vendor defining the reserved words (Oracle if null)
+	 * @param indentation indentation string, e.g. "\t"
+	 * @param lineBreak line break string, e.g. "\n"
+	 */
 	public SqlStatementFormatter(final DbVendor dbVendor, final String indentation, final String lineBreak) {
 		if (dbVendor == null) {
 			this.dbVendor = DbVendor.Oracle;
@@ -40,6 +55,12 @@ public class SqlStatementFormatter {
 		this.lineBreak = lineBreak;
 	}
 
+	/**
+	 * Sets the database vendor.
+	 *
+	 * @param dbVendor the database vendor
+	 * @return this instance for method chaining
+	 */
 	public SqlStatementFormatter setDbVendor(final DbVendor dbVendor) {
 		if (dbVendor == null) {
 			throw new IllegalArgumentException("Invalid empty DbVendor");
@@ -48,16 +69,34 @@ public class SqlStatementFormatter {
 		return this;
 	}
 
+	/**
+	 * Sets the indentation.
+	 *
+	 * @param indentation the indentation
+	 * @return this instance for method chaining
+	 */
 	public SqlStatementFormatter setIndentation(final String indentation) {
 		this.indentation = indentation;
 		return this;
 	}
 
+	/**
+	 * Sets the line break.
+	 *
+	 * @param lineBreak the line break
+	 * @return this instance for method chaining
+	 */
 	public SqlStatementFormatter setLineBreak(final String lineBreak) {
 		this.lineBreak = lineBreak;
 		return this;
 	}
 
+	/**
+	 * Formats a SQL statement.
+	 *
+	 * @param selectStatement SQL statement text
+	 * @return formatted SQL statement text, or null if the statement is blank
+	 */
 	public String format(String selectStatement) {
 		if (isBlank(selectStatement)) {
 			return null;
@@ -136,14 +175,15 @@ public class SqlStatementFormatter {
 					textStarter = nextChar;
 					nextLine.append(nextChar);
 				} else if (nextChar == '+' || nextChar == '-' || nextChar == '/' || nextChar == '*' || nextChar == '%' || nextChar == '=' || nextChar == '&' || nextChar == '|' || nextChar == '^' || nextChar == '<' || nextChar == '>' || nextChar == '!') {
-					if (i + 2 < data.length && DbUtilities.SQL_OPERATORS.contains(new StringBuilder(data[i]).append(data[i + 1]).append(data[i + 2]).toString())) {
+					// Watch out: "new StringBuilder(char)" would call the capacity constructor StringBuilder(int) and drop the character
+					if (i + 2 < data.length && DbUtilities.SQL_OPERATORS.contains(new StringBuilder().append(data[i]).append(data[i + 1]).append(data[i + 2]).toString())) {
 						if (nextLine.length() > 0) {
 							lines.add(nextLine.toString());
 							nextLine = new StringBuilder();
 						}
 						lines.add(new StringBuilder().append(data[i]).append(data[i + 1]).append(data[i + 2]).toString());
 						i = i + 2;
-					} else if (i + 1 < data.length && DbUtilities.SQL_OPERATORS.contains(new StringBuilder(data[i]).append(data[i + 1]).toString())) {
+					} else if (i + 1 < data.length && DbUtilities.SQL_OPERATORS.contains(new StringBuilder().append(data[i]).append(data[i + 1]).toString())) {
 						if (nextLine.length() > 0) {
 							lines.add(nextLine.toString());
 							nextLine = new StringBuilder();
@@ -156,6 +196,9 @@ public class SqlStatementFormatter {
 							nextLine = new StringBuilder();
 						}
 						lines.add(Character.toString(data[i]));
+					} else {
+						// Unknown single operator character (e.g. "!" without "="): keep it instead of dropping it
+						nextLine.append(nextChar);
 					}
 				} else if (nextChar == '(' || nextChar == ')' || nextChar == ';' || nextChar == ',' || nextChar == '.') {
 					if (nextLine.length() > 0) {
@@ -431,17 +474,16 @@ public class SqlStatementFormatter {
 				}
 			} else if ("SELECT".equals(line) && indentationLevel.size() > 0 && indentationLevel.peek() == IndentationType.With) {
 				indentationLevel.pop();
-			} else if ("WHEN".equals(line)) {
+			} else if ("WHEN".equals(line) && indentationLevel.contains(IndentationType.Case)) {
 				while (indentationLevel.peek() != IndentationType.Case) {
 					indentationLevel.pop();
 				}
-			} else if (line.startsWith("END")) {
+			} else if (("END".equals(line) || line.startsWith("END ") || line.startsWith("END,")) && indentationLevel.contains(IndentationType.Case)) {
+				// Only the keyword END closes a CASE, not identifiers like END_DATE
 				while (indentationLevel.peek() != IndentationType.Case) {
 					indentationLevel.pop();
 				}
-				if (indentationLevel.peek() == IndentationType.Case) {
-					indentationLevel.pop();
-				}
+				indentationLevel.pop();
 			}
 
 			for (int i = 0; i < indentationLevel.size(); i++) {
