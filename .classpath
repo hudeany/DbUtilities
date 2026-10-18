@@ -11,12 +11,12 @@
 	<classpathentry kind="con" path="org.eclipse.jdt.junit.JUNIT_CONTAINER/6"/>
 	<classpathentry kind="lib" path="lib_test/apiguardian-api-1.1.2.jar"/>
 	<classpathentry kind="lib" path="lib_test/hamcrest-3.0.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-jupiter-api-6.0.3.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-jupiter-engine-6.0.3.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-jupiter-params-6.0.3.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-platform-commons-6.0.3.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-platform-engine-6.0.3.jar"/>
-	<classpathentry kind="lib" path="lib_test/junit-platform-launcher-6.0.3.jar"/>
 	<classpathentry kind="lib" path="lib_test/opentest4j-1.3.0.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-jupiter-api-6.1.3.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-jupiter-engine-6.1.3.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-jupiter-params-6.1.3.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-platform-commons-6.1.3.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-platform-engine-6.1.3.jar"/>
+	<classpathentry kind="lib" path="lib_test/junit-platform-launcher-6.1.3.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
