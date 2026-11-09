@@ -1295,8 +1295,13 @@ public class DbUtilities {
 			final CaseInsensitiveMap<DbColumnType> returnMap = new CaseInsensitiveMap<>();
 			final DbVendor dbVendor = getDbVendor(connection);
 			if (DbVendor.Oracle == dbVendor) {
+				// Identity columns (auto increment) exist since Oracle 12c, older versions have no column "identity_column".
+				// Auto increments of older versions (sequence and trigger) cannot be detected.
+				final boolean hasIdentityColumns = connection.getMetaData().getDatabaseMajorVersion() >= 12;
 				// Watchout: Oracle's timestamp datatype is "TIMESTAMP(6)", so remove the bracket value
-				final String sql = "SELECT column_name, NVL(substr(data_type, 1, instr(data_type, '(') - 1), data_type) AS data_type, data_length, data_precision, data_scale, nullable FROM user_tab_columns WHERE LOWER(table_name) = LOWER(?)";
+				final String sql = "SELECT column_name, NVL(substr(data_type, 1, instr(data_type, '(') - 1), data_type) AS data_type, data_length, data_precision, data_scale, nullable"
+						+ (hasIdentityColumns ? ", identity_column" : "")
+						+ " FROM user_tab_columns WHERE LOWER(table_name) = LOWER(?)";
 				try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setNString(1, tableName);
@@ -1315,9 +1320,9 @@ public class DbUtilities {
 								numericScale = -1;
 							}
 							final boolean isNullable = "y".equalsIgnoreCase(resultSet.getString("nullable"));
+							final boolean isAutoIncrement = hasIdentityColumns && "yes".equalsIgnoreCase(resultSet.getString("identity_column"));
 
-							// TODO AutoIncrements will be introduced with Oracle 12
-							returnMap.put(resultSet.getString("column_name"), new DbColumnType(resultSet.getString("data_type"), characterLength, numericPrecision, numericScale, isNullable, false, null));
+							returnMap.put(resultSet.getString("column_name"), new DbColumnType(resultSet.getString("data_type"), characterLength, numericPrecision, numericScale, isNullable, isAutoIncrement, null));
 						}
 					}
 				}
@@ -1424,61 +1429,81 @@ public class DbUtilities {
 					}
 				}
 			} else if (DbVendor.Firebird == dbVendor) {
-				final String sql = "SELECT rf.rdb$field_name, f.rdb$field_type, f.rdb$field_sub_type, f.rdb$field_length, f.rdb$field_scale, f.rdb$null_flag"
+				// Identity columns (auto increment) exist since Firebird 3, older versions have no column "rdb$identity_type".
+				// Auto increments of older versions (generator and trigger) cannot be detected.
+				final boolean hasIdentityColumns = connection.getMetaData().getDatabaseMajorVersion() >= 3;
+				final String sql = "SELECT rf.rdb$field_name, f.rdb$field_type, f.rdb$field_sub_type, f.rdb$character_length, f.rdb$field_precision, f.rdb$field_scale, f.rdb$null_flag"
+						+ (hasIdentityColumns ? ", rf.rdb$identity_type" : "")
 						+ " FROM rdb$fields f JOIN rdb$relation_fields rf ON rf.rdb$field_source = f.rdb$field_name WHERE rf.rdb$relation_name = ?";
 				try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
 					preparedStatement.setFetchSize(100);
 					preparedStatement.setString(1, tableName.toUpperCase());
 					try (ResultSet resultSet = preparedStatement.executeQuery()) {
 						while (resultSet.next()) {
-							long characterLength = resultSet.getLong("rdb$field_length");
+							// rdb$character_length is the length in characters (rdb$field_length is in bytes, e.g. 4 bytes per character for UTF8).
+							// It is NULL for non character types.
+							long characterLength = resultSet.getLong("rdb$character_length");
 							if (resultSet.wasNull()) {
 								characterLength = -1;
 							}
-							int numericPrecision = resultSet.getInt("rdb$field_length");
-							if (resultSet.wasNull()) {
+							// rdb$field_precision is only set for NUMERIC and DECIMAL (0 or NULL for other types)
+							int numericPrecision = resultSet.getInt("rdb$field_precision");
+							if (resultSet.wasNull() || numericPrecision <= 0) {
 								numericPrecision = -1;
 							}
+							// Firebird stores the scale as negative value, e.g. -2 for NUMERIC(10,2)
 							int numericScale = resultSet.getInt("rdb$field_scale");
 							if (resultSet.wasNull()) {
 								numericScale = -1;
+							} else {
+								numericScale = -numericScale;
 							}
 							final boolean isNullable = resultSet.getObject("rdb$null_flag") == null;
 
+							final int fieldType = resultSet.getInt("rdb$field_type");
+							final int fieldSubType = resultSet.getInt("rdb$field_sub_type");
 							String dataType;
-							switch (resultSet.getInt("rdb$field_type")) {
-								case 7: dataType = "SMALLINT";
-								break;
-								case 8: dataType = "INTEGER";
-								break;
-								case 10: dataType = "FLOAT";
-								break;
-								case 12: dataType = "DATE";
-								break;
-								case 13: dataType = "TIME";
-								break;
-								case 14: dataType = "CHAR";
-								break;
-								case 16: dataType = "BIGINT";
-								break;
-								case 27: dataType = "DOUBLE PRECISION";
-								break;
-								case 35: dataType = "TIMESTAMP";
-								break;
-								case 37: dataType = "VARCHAR";
-								break;
-								case 261:
-									if (resultSet.getInt("rdb$field_sub_type") == 1) {
-										dataType = "CLOB";
-									} else {
-										dataType = "BLOB";
-									}
+							if ((fieldType == 7 || fieldType == 8 || fieldType == 16 || fieldType == 27) && (fieldSubType == 1 || fieldSubType == 2 || numericScale > 0)) {
+								// NUMERIC and DECIMAL are stored as SMALLINT, INTEGER, BIGINT (or DOUBLE PRECISION in dialect 1) with a sub type or a scale.
+								// Reporting them as integer type would lose the decimal places, e.g. when an interim table is created from these types.
+								dataType = fieldSubType == 2 ? "DECIMAL" : "NUMERIC";
+							} else {
+								switch (fieldType) {
+									case 7: dataType = "SMALLINT";
 									break;
-								default: dataType = getTypeNameById(resultSet.getInt("rdb$field_type"));
+									case 8: dataType = "INTEGER";
+									break;
+									case 10: dataType = "FLOAT";
+									break;
+									case 12: dataType = "DATE";
+									break;
+									case 13: dataType = "TIME";
+									break;
+									case 14: dataType = "CHAR";
+									break;
+									case 16: dataType = "BIGINT";
+									break;
+									case 27: dataType = "DOUBLE PRECISION";
+									break;
+									case 35: dataType = "TIMESTAMP";
+									break;
+									case 37: dataType = "VARCHAR";
+									break;
+									case 261:
+										if (fieldSubType == 1) {
+											dataType = "CLOB";
+										} else {
+											dataType = "BLOB";
+										}
+										break;
+									default: dataType = getTypeNameById(fieldType);
+								}
 							}
 
-							// TODO check autoincrement
-							returnMap.put(resultSet.getString("rdb$field_name").trim(), new DbColumnType(dataType, characterLength, numericPrecision, numericScale, isNullable, false, null));
+							// rdb$identity_type is NULL for normal columns, 0 for "GENERATED ALWAYS" and 1 for "GENERATED BY DEFAULT"
+							final boolean isAutoIncrement = hasIdentityColumns && resultSet.getObject("rdb$identity_type") != null;
+
+							returnMap.put(resultSet.getString("rdb$field_name").trim(), new DbColumnType(dataType, characterLength, numericPrecision, numericScale, isNullable, isAutoIncrement, null));
 						}
 					}
 				}
@@ -3229,7 +3254,8 @@ public class DbUtilities {
 	 * Joins all duplicates of a table into the first row of each key value: The duplicates are deleted and their
 	 * values are used to update the remaining row. Temporary helper columns and an interim table are used.
 	 * <p>
-	 * Not supported for Cassandra, which cannot fill the interim table.
+	 * Not supported for Cassandra: CQL has no subqueries (needed to detect and mark the duplicates),
+	 * no "INSERT INTO ... SELECT" and no "CREATE TABLE ... AS SELECT" (needed to fill the interim table).
 	 *
 	 * @param connection database connection
 	 * @param tableName name of the table
@@ -3237,8 +3263,14 @@ public class DbUtilities {
 	 * @param updateWithNullValues true to also take over NULL values of the duplicates
 	 * @return number of deleted duplicate rows
 	 * @throws Exception if the duplicates cannot be joined
+	 * @throws RuntimeException for Cassandra databases, which are not supported
 	 */
 	public static int joinDuplicates(final Connection connection, final String tableName, final Collection<String> keyColumnsWithFunctions, final boolean updateWithNullValues) throws Exception {
+		if (getDbVendor(connection) == DbVendor.Cassandra) {
+			// Fail before any change: Otherwise helper columns would be added and the duplicates would be deleted without joining their data
+			throw new RuntimeException("This method is not supported for Cassandra databases: joinDuplicates");
+		}
+
 		if (detectDuplicates(connection, tableName, keyColumnsWithFunctions) > 0) {
 			final DbVendor dbVendor = getDbVendor(connection);
 			final String randomSuffix = "" + new Random().nextInt(100000000);
@@ -3249,7 +3281,7 @@ public class DbUtilities {
 			// Join all duplicates in destination table
 			try (Statement statement = connection.createStatement()) {
 				// Create additional index columns
-				if (Utilities.isNotEmpty(keyColumnsWithFunctions) && dbVendor != DbVendor.Cassandra) {
+				if (Utilities.isNotEmpty(keyColumnsWithFunctions)) {
 					try {
 						statement.execute("CREATE INDEX tmp" + randomSuffix + "_idx ON " + tableName + " (" + joinColumnVendorEscaped(dbVendor, keyColumnsWithFunctions) + ")");
 						connection.commit();
@@ -3277,10 +3309,6 @@ public class DbUtilities {
 					createTable(connection, interimTableName, getColumnDataTypes(connection, tableName), null);
 					connection.commit();
 					statement.executeUpdate("INSERT INTO " + interimTableName + " SELECT * FROM " + tableName + " WHERE " + originalItemIndexColumn + " != " + originalDuplicateIndexColumn);
-				} else if (dbVendor == DbVendor.Cassandra) {
-					// There is no "create table as select"-statement in Cassandra
-					// TODO: Cassandra also has no "INSERT INTO ... SELECT", so the interim table stays empty and the duplicate data is not joined
-					createTable(connection, interimTableName, getColumnDataTypes(connection, tableName), getPrimaryKeyColumns(connection, tableName));
 				} else {
 					statement.execute("CREATE TABLE " + interimTableName + " AS SELECT * FROM " + tableName + " WHERE " + originalItemIndexColumn + " != " + originalDuplicateIndexColumn);
 				}

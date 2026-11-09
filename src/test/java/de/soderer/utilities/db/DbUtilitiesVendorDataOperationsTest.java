@@ -60,8 +60,8 @@ public class DbUtilitiesVendorDataOperationsTest {
 				return database.on("FROM information_schema.columns", rows(new String[] { "column_name", "data_type", "character_maximum_length", "numeric_precision", "numeric_scale", "is_nullable", "column_default" },
 						new Object[] { "id", "integer", null, Integer.valueOf(32), Integer.valueOf(0), "NO", withAutoIncrement ? "nextval('s')" : null }, new Object[] { "name", "character varying", Long.valueOf(30), null, null, "YES", null }));
 			case "Firebird":
-				return database.on("FROM rdb\\$fields", rows(new String[] { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$field_length", "rdb$field_scale", "rdb$null_flag" },
-						new Object[] { "ID", Integer.valueOf(8), Integer.valueOf(0), Long.valueOf(4), Integer.valueOf(0), Integer.valueOf(1) }, new Object[] { "NAME", Integer.valueOf(37), Integer.valueOf(0), Long.valueOf(30), Integer.valueOf(0), null }));
+				return database.on("FROM rdb\\$fields", rows(new String[] { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$character_length", "rdb$field_precision", "rdb$field_scale", "rdb$null_flag" },
+						new Object[] { "ID", Integer.valueOf(8), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), Integer.valueOf(1) }, new Object[] { "NAME", Integer.valueOf(37), Integer.valueOf(0), Long.valueOf(30), null, Integer.valueOf(0), null }));
 			case "Microsoft SQL Server":
 				return database.on("COLUMNPROPERTY", rows(new String[] { "column_name", "data_type", "character_maximum_length", "numeric_precision", "numeric_scale", "is_nullable", "is_identity" },
 						new Object[] { "id", "int", null, Integer.valueOf(10), Integer.valueOf(0), "NO", Integer.valueOf(withAutoIncrement ? 1 : 0) }, new Object[] { "name", "varchar", Long.valueOf(30), null, null, "YES", Integer.valueOf(0) }));
@@ -198,7 +198,7 @@ public class DbUtilitiesVendorDataOperationsTest {
 
 	@Test
 	public void testJoinDuplicates() throws Exception {
-		for (final String productName : new String[] { "MySQL", "PostgreSQL", "HSQL Database Engine", "Firebird", "Cassandra" }) {
+		for (final String productName : new String[] { "MySQL", "PostgreSQL", "HSQL Database Engine", "Firebird" }) {
 			for (final boolean updateWithNullValues : new boolean[] { true, false }) {
 				final FakeDatabase database = new FakeDatabase(productName)
 						.on("SELECT \\* FROM tab WHERE 1 = 0", BASE_COLUMNS, BASE_COLUMNS, rows(new String[] { "id", "name", "join_idx", "join_dpl", "drop_idx", "drop_dpl", "updatedindex" }))
@@ -213,6 +213,11 @@ public class DbUtilitiesVendorDataOperationsTest {
 				assertTrue(database.executed("DROP TABLE tmp_join_\\d+"), productName);
 			}
 		}
+
+		// Cassandra is not supported (no subqueries, no INSERT INTO ... SELECT) and must fail before any change of the table
+		final FakeDatabase cassandra = withColumnTypes(new FakeDatabase("Cassandra"), "Cassandra", false);
+		assertTrue(assertThrows(RuntimeException.class, () -> DbUtilities.joinDuplicates(cassandra.connection(), "tab", List.of("name"), true)).getMessage().contains("not supported for Cassandra"));
+		assertFalse(cassandra.executed("ALTER TABLE|DELETE|CREATE"));
 
 		final FakeDatabase failing = new FakeDatabase("MySQL")
 				.on("SELECT \\* FROM tab WHERE 1 = 0", BASE_COLUMNS)

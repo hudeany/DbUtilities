@@ -145,21 +145,21 @@ public class DbUtilitiesVendorMetadataTest {
 		assertEquals(2, derbyTypes.get("amount").getNumericScale());
 		assertEquals(-1, derbyTypes.get("broken").getCharacterByteSize());
 
-		final String[] firebirdColumns = { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$field_length", "rdb$field_scale", "rdb$null_flag" };
+		final String[] firebirdColumns = { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$character_length", "rdb$field_precision", "rdb$field_scale", "rdb$null_flag" };
 		final Object[][] firebirdRows = new Object[][] {
-				{ "C7 ", Integer.valueOf(7), Integer.valueOf(0), Long.valueOf(2), Integer.valueOf(0), Integer.valueOf(1) },
-				{ "C8", Integer.valueOf(8), Integer.valueOf(0), Long.valueOf(4), Integer.valueOf(0), null },
-				{ "C10", Integer.valueOf(10), Integer.valueOf(0), null, null, null },
-				{ "C12", Integer.valueOf(12), Integer.valueOf(0), Long.valueOf(4), Integer.valueOf(0), null },
-				{ "C13", Integer.valueOf(13), Integer.valueOf(0), Long.valueOf(4), Integer.valueOf(0), null },
-				{ "C14", Integer.valueOf(14), Integer.valueOf(0), Long.valueOf(4), Integer.valueOf(0), null },
-				{ "C16", Integer.valueOf(16), Integer.valueOf(0), Long.valueOf(8), Integer.valueOf(0), null },
-				{ "C27", Integer.valueOf(27), Integer.valueOf(0), Long.valueOf(8), Integer.valueOf(0), null },
-				{ "C35", Integer.valueOf(35), Integer.valueOf(0), Long.valueOf(8), Integer.valueOf(0), null },
-				{ "C37", Integer.valueOf(37), Integer.valueOf(0), Long.valueOf(40), Integer.valueOf(0), null },
-				{ "C261A", Integer.valueOf(261), Integer.valueOf(1), Long.valueOf(8), Integer.valueOf(0), null },
-				{ "C261B", Integer.valueOf(261), Integer.valueOf(0), Long.valueOf(8), Integer.valueOf(0), null },
-				{ "C1", Integer.valueOf(1), Integer.valueOf(0), Long.valueOf(8), Integer.valueOf(0), null } };
+				{ "C7 ", Integer.valueOf(7), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), Integer.valueOf(1) },
+				{ "C8", Integer.valueOf(8), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), null },
+				{ "C10", Integer.valueOf(10), Integer.valueOf(0), null, null, null, null },
+				{ "C12", Integer.valueOf(12), Integer.valueOf(0), null, null, Integer.valueOf(0), null },
+				{ "C13", Integer.valueOf(13), Integer.valueOf(0), null, null, Integer.valueOf(0), null },
+				{ "C14", Integer.valueOf(14), Integer.valueOf(0), Long.valueOf(4), null, Integer.valueOf(0), null },
+				{ "C16", Integer.valueOf(16), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), null },
+				{ "C27", Integer.valueOf(27), Integer.valueOf(0), null, null, Integer.valueOf(0), null },
+				{ "C35", Integer.valueOf(35), Integer.valueOf(0), null, null, Integer.valueOf(0), null },
+				{ "C37", Integer.valueOf(37), Integer.valueOf(0), Long.valueOf(40), null, Integer.valueOf(0), null },
+				{ "C261A", Integer.valueOf(261), Integer.valueOf(1), null, null, Integer.valueOf(0), null },
+				{ "C261B", Integer.valueOf(261), Integer.valueOf(0), null, null, Integer.valueOf(0), null },
+				{ "C1", Integer.valueOf(1), Integer.valueOf(0), null, null, Integer.valueOf(0), null } };
 		final FakeDatabase firebird = new FakeDatabase("Firebird").on("FROM rdb\\$fields", rows(firebirdColumns, firebirdRows));
 		final Map<String, DbColumnType> firebirdTypes = DbUtilities.getColumnDataTypes(firebird.connection(), "tab");
 		assertEquals("SMALLINT", firebirdTypes.get("c7").getTypeName());
@@ -174,6 +174,9 @@ public class DbUtilitiesVendorMetadataTest {
 		assertEquals("DOUBLE PRECISION", firebirdTypes.get("c27").getTypeName());
 		assertEquals("TIMESTAMP", firebirdTypes.get("c35").getTypeName());
 		assertEquals("VARCHAR", firebirdTypes.get("c37").getTypeName());
+		assertEquals(40, firebirdTypes.get("c37").getCharacterByteSize());
+		assertEquals(-1, firebirdTypes.get("c8").getNumericPrecision());
+		assertFalse(firebirdTypes.get("c8").isAutoIncrement());
 		assertEquals("CLOB", firebirdTypes.get("c261a").getTypeName());
 		assertEquals("BLOB", firebirdTypes.get("c261b").getTypeName());
 		assertEquals("CHAR", firebirdTypes.get("c1").getTypeName());
@@ -591,5 +594,58 @@ public class DbUtilitiesVendorMetadataTest {
 		assertFalse(DbUtilities.checkSchemaExist(postgres.connection(), "missing"));
 		assertFalse(DbUtilities.checkSchemaExist(postgres.connection(), " "));
 		assertTrue(assertThrows(Exception.class, () -> DbUtilities.checkSchemaExist(new FakeDatabase("Oracle").connection(), "app")).getMessage().contains("Unsupported db vendor"));
+	}
+
+	@Test
+	public void testColumnDataTypesFirebirdNumericAndIdentity() throws Exception {
+		final String[] columns = { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$character_length", "rdb$field_precision", "rdb$field_scale", "rdb$null_flag", "rdb$identity_type" };
+		final Object[][] columnRows = new Object[][] {
+				// NUMERIC(10,2) stored as BIGINT with sub type 1 and negative scale
+				{ "AMOUNT", Integer.valueOf(16), Integer.valueOf(1), null, Integer.valueOf(10), Integer.valueOf(-2), null, null },
+				// DECIMAL(5,1) stored as INTEGER with sub type 2
+				{ "RATE", Integer.valueOf(8), Integer.valueOf(2), null, Integer.valueOf(5), Integer.valueOf(-1), null, null },
+				// Dialect 1 NUMERIC(15,2) stored as DOUBLE PRECISION with scale only
+				{ "OLDAMOUNT", Integer.valueOf(27), Integer.valueOf(0), null, null, Integer.valueOf(-2), null, null },
+				// Identity column "GENERATED BY DEFAULT"
+				{ "ID", Integer.valueOf(8), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), Integer.valueOf(1), Integer.valueOf(1) },
+				// UTF8 VARCHAR(100): rdb$field_length would be 400 bytes
+				{ "NAME", Integer.valueOf(37), Integer.valueOf(0), Long.valueOf(100), null, Integer.valueOf(0), null, null } };
+		final FakeDatabase firebird = new FakeDatabase("Firebird").withDatabaseMajorVersion(3).on("FROM rdb\\$fields", rows(columns, columnRows));
+		final Map<String, DbColumnType> types = DbUtilities.getColumnDataTypes(firebird.connection(), "tab");
+
+		assertTrue(firebird.executed("rdb\\$identity_type"));
+		assertEquals("NUMERIC", types.get("amount").getTypeName());
+		assertEquals(10, types.get("amount").getNumericPrecision());
+		assertEquals(2, types.get("amount").getNumericScale());
+		assertEquals("DECIMAL", types.get("rate").getTypeName());
+		assertEquals(1, types.get("rate").getNumericScale());
+		assertEquals("NUMERIC", types.get("oldamount").getTypeName());
+		assertEquals("INTEGER", types.get("id").getTypeName());
+		assertTrue(types.get("id").isAutoIncrement());
+		assertFalse(types.get("amount").isAutoIncrement());
+		assertEquals(100, types.get("name").getCharacterByteSize());
+
+		// Firebird 2.5 has no rdb$identity_type, so it must not be queried
+		final FakeDatabase firebird25 = new FakeDatabase("Firebird").withDatabaseMajorVersion(2).on("FROM rdb\\$fields", rows(new String[] { "rdb$field_name", "rdb$field_type", "rdb$field_sub_type", "rdb$character_length", "rdb$field_precision", "rdb$field_scale", "rdb$null_flag" },
+				new Object[] { "ID", Integer.valueOf(8), Integer.valueOf(0), null, Integer.valueOf(0), Integer.valueOf(0), Integer.valueOf(1) }));
+		assertFalse(DbUtilities.getColumnDataTypes(firebird25.connection(), "tab").get("id").isAutoIncrement());
+		assertFalse(firebird25.executed("rdb\\$identity_type"));
+	}
+
+	@Test
+	public void testColumnDataTypesOracleIdentity() throws Exception {
+		final FakeDatabase oracle12 = new FakeDatabase("Oracle").withDatabaseMajorVersion(12).on("FROM user_tab_columns", rows(new String[] { "column_name", "data_type", "data_length", "data_precision", "data_scale", "nullable", "identity_column" },
+				new Object[] { "ID", "NUMBER", Integer.valueOf(22), Integer.valueOf(10), Integer.valueOf(0), "N", "YES" },
+				new Object[] { "NAME", "VARCHAR2", Integer.valueOf(30), null, null, "Y", "NO" }));
+		final Map<String, DbColumnType> types12 = DbUtilities.getColumnDataTypes(oracle12.connection(), "tab");
+		assertTrue(oracle12.executed("identity_column"));
+		assertTrue(types12.get("id").isAutoIncrement());
+		assertFalse(types12.get("name").isAutoIncrement());
+
+		// Oracle 11 has no column "identity_column", so it must not be queried
+		final FakeDatabase oracle11 = new FakeDatabase("Oracle").withDatabaseMajorVersion(11).on("FROM user_tab_columns", rows(new String[] { "column_name", "data_type", "data_length", "data_precision", "data_scale", "nullable" },
+				new Object[] { "ID", "NUMBER", Integer.valueOf(22), Integer.valueOf(10), Integer.valueOf(0), "N" }));
+		assertFalse(DbUtilities.getColumnDataTypes(oracle11.connection(), "tab").get("id").isAutoIncrement());
+		assertFalse(oracle11.executed("identity_column"));
 	}
 }

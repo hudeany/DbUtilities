@@ -5,8 +5,6 @@ import java.util.List;
 
 /**
  * Simple object model of a SQL SELECT statement, formatted by {@link SelectStatementFormatter}.
- * <p>
- * TODO: UNION ALL
  */
 public class SelectStatement {
 	private List<WithDefinition> withClauses = new ArrayList<>();
@@ -19,9 +17,9 @@ public class SelectStatement {
 	private List<String> orderBy;
 
 	/**
-	 * Returns the named subqueries of the WITH clause.
+	 * Returns the named sub-queries of the WITH clause.
 	 *
-	 * @return the named subqueries of the WITH clause
+	 * @return the named sub-queries of the WITH clause
 	 */
 	public List<WithDefinition> getWithClauses() {
 		return withClauses;

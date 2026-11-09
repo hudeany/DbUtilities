@@ -117,6 +117,7 @@ public final class FakeJdbc {
 		private int commitCount = 0;
 		private int rollbackCount = 0;
 		private boolean noMetaData = false;
+		private int databaseMajorVersion = 0;
 
 		public FakeDatabase(final String productName) {
 			this.productName = productName;
@@ -137,6 +138,14 @@ public final class FakeJdbc {
 		 */
 		public FakeDatabase withoutMetaData() {
 			noMetaData = true;
+			return this;
+		}
+
+		/**
+		 * Sets the version returned by DatabaseMetaData.getDatabaseMajorVersion() (default 0).
+		 */
+		public FakeDatabase withDatabaseMajorVersion(final int majorVersion) {
+			databaseMajorVersion = majorVersion;
 			return this;
 		}
 
@@ -293,6 +302,8 @@ public final class FakeJdbc {
 					return database.productName;
 				case "getURL":
 					return "jdbc:fake:" + database.productName;
+				case "getDatabaseMajorVersion":
+					return Integer.valueOf(database.databaseMajorVersion);
 				case "getPrimaryKeys":
 				case "getImportedKeys":
 					final String sql = "META " + method.getName() + " " + (args[1] == null ? "" : args[1] + ".") + args[2];
