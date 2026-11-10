@@ -610,7 +610,7 @@ public class DbUtilities {
 
 			Class.forName(dbVendor.getDriverClassName());
 		} catch (final Exception e) {
-			throw new Exception("Cannot create database connection, caused by unknown DriverClassName: " + e.getMessage());
+			throw new Exception("Cannot create database connection, caused by unknown DriverClassName: " + e.getMessage() + getConnectionErrorHelpText(dbVendor, e, null), e);
 		}
 
 		try {
@@ -775,10 +775,14 @@ public class DbUtilities {
 		} catch (final DbNotExistsException e) {
 			throw e;
 		} catch (final Exception e) {
-			try {
-				int port;
-				if (Utilities.isNotEmpty(hostnameAndPort)) {
+			// Check the plain network connection to distinguish network problems from database problems.
+			// Before, the database error itself was also reported as "caused by Url", because the exception thrown
+			// after a successful network check was caught by the network check error handling.
+			String networkProblem = null;
+			if (Utilities.isNotEmpty(hostnameAndPort)) {
+				try {
 					if (hostnameAndPort.contains(":")) {
+						int port;
 						try {
 							port = Integer.parseInt(hostnameAndPort.substring(hostnameAndPort.indexOf(":") + 1));
 						} catch (@SuppressWarnings("unused") final Exception e1) {
@@ -786,16 +790,121 @@ public class DbUtilities {
 						}
 						Utilities.testConnection(hostnameAndPort.substring(0, hostnameAndPort.indexOf(":")), port);
 					} else {
-						port = dbVendor.getDefaultPort();
-						Utilities.testConnection(hostnameAndPort, port);
+						Utilities.testConnection(hostnameAndPort, dbVendor.getDefaultPort());
 					}
+				} catch (final Exception e1) {
+					networkProblem = e1.getMessage();
 				}
-
-				// No Exception from testConnection, so it must be some other problem
-				throw new Exception("Cannot create database connection: " + e.getMessage(), e);
-			} catch (final Exception e1) {
-				throw new Exception("Cannot create database connection, caused by Url (" + hostnameAndPort + "): " + e1.getMessage(), e1);
 			}
+
+			if (networkProblem != null) {
+				throw new Exception("Cannot create database connection, caused by Url (" + hostnameAndPort + "): " + networkProblem + getConnectionErrorHelpText(dbVendor, e, networkProblem), e);
+			} else {
+				throw new Exception("Cannot create database connection: " + e.getMessage() + getConnectionErrorHelpText(dbVendor, e, null), e);
+			}
+		}
+	}
+
+	/**
+	 * Returns a help text for a failed database connection, which explains the probable cause and what to check.
+	 * The causes of the exception are analysed, e.g. for authentication errors, unknown databases, untrusted server
+	 * certificates, missing JDBC drivers and network problems.
+	 *
+	 * @param dbVendor database vendor, or null if unknown
+	 * @param exception the exception of the failed connection
+	 * @param networkProblem error message of the failed plain network connection test, or null if the network connection works or was not tested
+	 * @return help text starting with a line break, or an empty text if no specific help is known
+	 */
+	public static String getConnectionErrorHelpText(final DbVendor dbVendor, final Throwable exception, final String networkProblem) {
+		final List<String> hints = new ArrayList<>();
+
+		if (networkProblem != null) {
+			if (networkProblem.startsWith("Cannot resolve hostname")) {
+				hints.add("The hostname cannot be resolved: Check the spelling of the hostname and the DNS or hosts file configuration.");
+			} else if (networkProblem.startsWith("Invalid port")) {
+				hints.add("The port must be a number, e.g. \"hostname:" + (dbVendor == null ? "1234" : dbVendor.getDefaultPort()) + "\".");
+			} else {
+				hints.add("The database server cannot be reached: Check that the server is running and listening on this host and port, and that no firewall or missing VPN connection blocks the access."
+						+ (dbVendor != null && dbVendor.getDefaultPort() > 0 ? " The default port of " + dbVendor.name() + " is " + dbVendor.getDefaultPort() + "." : ""));
+			}
+			// Without network connection the database errors are only consequences
+			return "\nHint: " + hints.get(0);
+		}
+
+		Throwable cause = exception;
+		int depth = 0;
+		while (cause != null && depth++ < 20) {
+			final String message = cause.getMessage() == null ? "" : cause.getMessage();
+			final String lowerMessage = message.toLowerCase();
+			final String className = cause.getClass().getName();
+
+			if (cause instanceof ClassNotFoundException || lowerMessage.contains("no suitable driver")) {
+				String downloadHint = "";
+				try {
+					downloadHint = " Download: " + getDownloadUrl(dbVendor);
+				} catch (@SuppressWarnings("unused") final Exception e) {
+					// No download location known
+				}
+				addHint(hints, "The JDBC driver of " + (dbVendor == null ? "the database vendor" : dbVendor.name()) + " is not available: Configure the driver jar file in the application configuration." + downloadHint);
+			} else if (className.endsWith("SSLHandshakeException") || lowerMessage.contains("pkix") || lowerMessage.contains("unable to find valid certification path")) {
+				addHint(hints, "The certificate of the database server is not trusted: Create a TrustStore with \"createtruststore hostname:port truststorefile\" and use it for the connection (parameter \"-truststore\").");
+			} else if (lowerMessage.contains("public key retrieval is not allowed")) {
+				addHint(hints, "The server uses the authentication \"caching_sha2_password\", which needs the public key of the server: Use a secure connection (parameter \"-secure\") or log in once with another client to fill the server's authentication cache.");
+			} else if (className.endsWith("SocketTimeoutException") || cause instanceof java.sql.SQLTimeoutException || lowerMessage.contains("timed out") || lowerMessage.contains("ora-12170")) {
+				addHint(hints, "The connection timed out: Check that the server is reachable and that no firewall drops the connection.");
+			}
+
+			if (cause instanceof SQLException) {
+				final SQLException sqlException = (SQLException) cause;
+				final String sqlState = sqlException.getSQLState() == null ? "" : sqlException.getSQLState();
+				final int errorCode = sqlException.getErrorCode();
+
+				if (sqlState.startsWith("28")
+						|| (dbVendor == DbVendor.Oracle && errorCode == 1017)
+						|| ((dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) && errorCode == 1045)
+						|| (dbVendor == DbVendor.MsSQL && errorCode == 18456)
+						|| lowerMessage.contains("password authentication failed")
+						|| lowerMessage.contains("access denied for user")
+						|| lowerMessage.contains("login failed")
+						|| lowerMessage.contains("invalid username/password")) {
+					addHint(hints, "The login was rejected: Check the username and the password and whether the user may connect from this host.");
+				} else if (dbVendor == DbVendor.Oracle && errorCode == 28000) {
+					addHint(hints, "The database account is locked: Ask the database administrator to unlock it.");
+				} else if (dbVendor == DbVendor.Oracle && errorCode == 28001) {
+					addHint(hints, "The password of the database account has expired: Change the password with another database client.");
+				} else if ("3D000".equals(sqlState)
+						|| ((dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) && errorCode == 1049)
+						|| (dbVendor == DbVendor.MsSQL && errorCode == 4060)
+						|| (dbVendor == DbVendor.Oracle && (errorCode == 12505 || errorCode == 12514))
+						|| lowerMessage.contains("ora-12505") || lowerMessage.contains("ora-12514")
+						|| lowerMessage.contains("unknown database")) {
+					addHint(hints, "The database is unknown on the server: Check the database name" + (dbVendor == DbVendor.Oracle ? " (Oracle: SID, \"/servicename\" for a service name, or a TNS description)" : "") + ".");
+				} else if ((dbVendor == DbVendor.Oracle && errorCode == 12541) || lowerMessage.contains("ora-12541")) {
+					addHint(hints, "There is no Oracle listener on this host and port: Check the port and that the listener is running.");
+				} else if ("53300".equals(sqlState) || ((dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) && errorCode == 1040) || lowerMessage.contains("too many connections")) {
+					addHint(hints, "The database server has no free connections: Close unused connections or increase the connection limit of the server.");
+				}
+			}
+
+			if (cause.getCause() == cause) {
+				break;
+			}
+			cause = cause.getCause();
+		}
+
+		if (hints.isEmpty()) {
+			return "";
+		} else {
+			return "\nHint: " + Utilities.join(hints, "\nHint: ");
+		}
+	}
+
+	/**
+	 * Adds a hint only once (the same cause may appear several times in the exception chain).
+	 */
+	private static void addHint(final List<String> hints, final String hint) {
+		if (!hints.contains(hint)) {
+			hints.add(hint);
 		}
 	}
 
@@ -4190,6 +4299,20 @@ public class DbUtilities {
 	 * @throws Exception if the file is too big for the server or cannot be stored
 	 */
 	public static void updateBlob(final DbConnectionDefinition dbDefinition, final String sqlUpdateStatementWithPlaceholder, final String filePath) throws Exception {
+		updateBlobData(dbDefinition, sqlUpdateStatementWithPlaceholder, filePath);
+	}
+
+	/**
+	 * Imports the content of a file into a blob or clob column with an update statement, which contains one "?" as
+	 * placeholder for the file data, and returns the number of updated rows.
+	 *
+	 * @param dbDefinition connection parameters
+	 * @param sqlUpdateStatementWithPlaceholder update statement with one "?" placeholder for the file data
+	 * @param filePath path of the file to import
+	 * @return number of updated rows
+	 * @throws Exception if the file is too big for the MySQL/MariaDB server settings or the update fails
+	 */
+	public static int updateBlobData(final DbConnectionDefinition dbDefinition, final String sqlUpdateStatementWithPlaceholder, final String filePath) throws Exception {
 		try (Connection connection = createConnection(dbDefinition, false)) {
 			if (dbDefinition.getDbVendor() == DbVendor.MySQL) {
 				final long maxPacketSize = getMysqlConnectionNumericVariable(connection, "max_allowed_packet");
@@ -4206,11 +4329,362 @@ public class DbUtilities {
 			try (FileInputStream inputStream = new FileInputStream(new File(filePath))) {
 				try (PreparedStatement preparedStatement = connection.prepareStatement(sqlUpdateStatementWithPlaceholder)) {
 					preparedStatement.setBinaryStream(1, inputStream);
-					preparedStatement.execute();
-				} catch (final Exception e) {
-					throw e;
+					final int updatedRows = preparedStatement.executeUpdate();
+					if (!connection.getAutoCommit()) {
+						connection.commit();
+					}
+					return updatedRows;
 				}
 			}
+		}
+	}
+
+	/**
+	 * Returns the columns of a table, which need a value for an insert, but are neither part of the insert columns
+	 * nor of the additional insert values: NOT NULL columns without default value, which are no auto increment,
+	 * identity or generated columns.
+	 * <p>
+	 * Only reliable results are returned, so the list is empty, if the database would not reject such inserts or the
+	 * columns cannot be determined for sure:
+	 * <ul>
+	 * <li>Cassandra (no NOT NULL constraints)</li>
+	 * <li>MySQL and MariaDB without strict SQL mode (missing values are filled with implicit defaults)</li>
+	 * <li>Tables with active insert triggers, which may fill the columns (unless the triggers are deactivated for the import)</li>
+	 * <li>Tables or columns, whose default values cannot be read from the database metadata</li>
+	 * </ul>
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the destination table, optionally with schema prefix
+	 * @param insertColumns columns which get values from the import data
+	 * @param additionalInsertValues optional additional values as lines "column = SQL value", separated by line breaks or semicolons
+	 * @param triggersDeactivated true if the triggers of the table are deactivated during the import
+	 * @return names of the columns without value, sorted, empty if there are none or the check is not reliable
+	 * @throws Exception if the column types cannot be read
+	 */
+	public static List<String> getMissingNotNullColumnsForInsert(final Connection connection, final String tableName, final Collection<String> insertColumns, final String additionalInsertValues, final boolean triggersDeactivated) throws Exception {
+		final List<String> missingColumns = new ArrayList<>();
+		final DbVendor dbVendor = getDbVendor(connection);
+		if (dbVendor == DbVendor.Cassandra) {
+			return missingColumns;
+		}
+
+		if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
+			String sqlMode;
+			try {
+				sqlMode = callWithSavepoint(connection, () -> {
+					try (Statement statement = connection.createStatement(); ResultSet resultSet = statement.executeQuery("SELECT @@SESSION.sql_mode")) {
+						return resultSet.next() ? resultSet.getString(1) : null;
+					}
+				});
+			} catch (@SuppressWarnings("unused") final Exception e) {
+				sqlMode = null;
+			}
+			if (sqlMode == null || !(sqlMode.toUpperCase().contains("STRICT_TRANS_TABLES") || sqlMode.toUpperCase().contains("STRICT_ALL_TABLES"))) {
+				// Without strict mode, missing values are filled with the implicit default of the data type
+				return missingColumns;
+			}
+		}
+
+		if (!triggersDeactivated) {
+			final Boolean hasInsertTriggers = hasInsertTriggers(connection, tableName);
+			if (hasInsertTriggers == null || hasInsertTriggers) {
+				// A trigger may fill the columns
+				return missingColumns;
+			}
+		}
+
+		final Map<String, ColumnInsertInfo> columnInsertInfos = readColumnInsertInfos(connection, dbVendor, tableName);
+		if (columnInsertInfos == null || columnInsertInfos.isEmpty()) {
+			return missingColumns;
+		}
+
+		final CaseInsensitiveSet providedColumns = new CaseInsensitiveSet();
+		if (insertColumns != null) {
+			for (final String insertColumn : insertColumns) {
+				providedColumns.add(unquoteName(dbVendor, insertColumn));
+			}
+		}
+		if (Utilities.isNotBlank(additionalInsertValues)) {
+			for (final String line : Utilities.splitAndTrimListQuoted(additionalInsertValues, '\n', '\r', ';')) {
+				if (line.contains("=")) {
+					providedColumns.add(unquoteName(dbVendor, line.substring(0, line.indexOf("=")).trim()));
+				}
+			}
+		}
+
+		final CaseInsensitiveMap<DbColumnType> columnTypes = getColumnDataTypes(connection, tableName);
+
+		// SQLite: a single INTEGER primary key is an alias of the rowid and gets a value automatically
+		String sqliteRowIdColumn = null;
+		if (dbVendor == DbVendor.SQLite) {
+			final CaseInsensitiveSet primaryKeyColumns = getPrimaryKeyColumns(connection, tableName);
+			if (primaryKeyColumns.size() == 1) {
+				final String primaryKeyColumn = primaryKeyColumns.iterator().next();
+				final DbColumnType primaryKeyType = columnTypes.get(primaryKeyColumn);
+				if (primaryKeyType != null && primaryKeyType.getTypeName() != null && "integer".equalsIgnoreCase(primaryKeyType.getTypeName().trim())) {
+					sqliteRowIdColumn = primaryKeyColumn;
+				}
+			}
+		}
+
+		for (final Entry<String, DbColumnType> columnEntry : columnTypes.entrySet()) {
+			final String columnName = columnEntry.getKey();
+			final DbColumnType columnType = columnEntry.getValue();
+			if (columnType.isNullable() || columnType.isAutoIncrement() || providedColumns.contains(columnName) || columnName.equalsIgnoreCase(sqliteRowIdColumn)) {
+				continue;
+			}
+			if (dbVendor == DbVendor.MsSQL && columnType.getTypeName() != null
+					&& ("timestamp".equalsIgnoreCase(columnType.getTypeName().trim()) || "rowversion".equalsIgnoreCase(columnType.getTypeName().trim()))) {
+				// Filled automatically by the server
+				continue;
+			}
+
+			final ColumnInsertInfo columnInsertInfo = columnInsertInfos.get(columnName.toLowerCase());
+			if (columnInsertInfo == null || columnInsertInfo.hasDefaultValue || columnInsertInfo.isAutoIncrement || columnInsertInfo.isGenerated) {
+				// Unknown columns are not reported, because the result must be reliable
+				continue;
+			}
+
+			missingColumns.add(columnName);
+		}
+
+		missingColumns.sort(String.CASE_INSENSITIVE_ORDER);
+		return missingColumns;
+	}
+
+	/**
+	 * Checks whether a table has active triggers for inserts, which may change the inserted values.
+	 *
+	 * @param connection database connection
+	 * @param tableName name of the table, optionally with schema prefix
+	 * @return true if there are active insert triggers (for Firebird and MS SQL Server any active trigger), false if there are none, null if unknown (unsupported vendor or missing privileges)
+	 */
+	public static Boolean hasInsertTriggers(final Connection connection, final String tableName) {
+		try {
+			final DbVendor dbVendor = getDbVendor(connection);
+			final String schemaName = tableName.contains(".") ? tableName.substring(0, tableName.lastIndexOf(".")).trim() : null;
+			final String plainTableName = unquoteName(dbVendor, tableName.contains(".") ? tableName.substring(tableName.lastIndexOf(".") + 1) : tableName);
+
+			final String sql;
+			final List<String> parameters = new ArrayList<>();
+			if (dbVendor == DbVendor.Oracle) {
+				sql = "SELECT COUNT(*) FROM all_triggers WHERE LOWER(table_name) = LOWER(?) AND status = 'ENABLED' AND triggering_event LIKE '%INSERT%' AND table_owner = " + (schemaName != null ? "UPPER(?)" : "USER");
+				parameters.add(plainTableName);
+				if (schemaName != null) {
+					parameters.add(unquoteName(dbVendor, schemaName));
+				}
+			} else if (dbVendor == DbVendor.PostgreSQL) {
+				sql = "SELECT COUNT(*) FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid WHERE NOT t.tgisinternal AND t.tgenabled <> 'D' AND (t.tgtype & 4) <> 0 AND LOWER(c.relname) = LOWER(?)"
+						+ (schemaName != null ? " AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE LOWER(nspname) = LOWER(?))" : " AND pg_table_is_visible(c.oid)");
+				parameters.add(plainTableName);
+				if (schemaName != null) {
+					parameters.add(unquoteName(dbVendor, schemaName));
+				}
+			} else if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
+				sql = "SELECT COUNT(*) FROM information_schema.triggers WHERE event_manipulation = 'INSERT' AND LOWER(event_object_table) = LOWER(?) AND event_object_schema = " + (schemaName != null ? "?" : "SCHEMA()");
+				parameters.add(plainTableName);
+				if (schemaName != null) {
+					parameters.add(unquoteName(dbVendor, schemaName));
+				}
+			} else if (dbVendor == DbVendor.MsSQL) {
+				sql = "SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID(?) AND is_disabled = 0";
+				parameters.add(tableName);
+			} else if (dbVendor == DbVendor.Firebird) {
+				sql = "SELECT COUNT(*) FROM rdb$triggers WHERE LOWER(TRIM(rdb$relation_name)) = LOWER(?) AND COALESCE(rdb$trigger_inactive, 0) = 0 AND COALESCE(rdb$system_flag, 0) = 0";
+				parameters.add(plainTableName);
+			} else if (dbVendor == DbVendor.Derby) {
+				sql = "SELECT COUNT(*) FROM sys.systriggers tr JOIN sys.systables t ON tr.tableid = t.tableid WHERE LOWER(t.tablename) = LOWER(?) AND tr.event = 'I' AND tr.state = 'E'";
+				parameters.add(plainTableName);
+			} else if (dbVendor == DbVendor.HSQL) {
+				sql = "SELECT COUNT(*) FROM information_schema.triggers WHERE event_manipulation = 'INSERT' AND LOWER(event_object_table) = LOWER(?)";
+				parameters.add(plainTableName);
+			} else if (dbVendor == DbVendor.SQLite) {
+				sql = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND LOWER(tbl_name) = LOWER(?)";
+				parameters.add(plainTableName);
+			} else {
+				return null;
+			}
+
+			return callWithSavepoint(connection, () -> {
+				try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+					for (int i = 0; i < parameters.size(); i++) {
+						preparedStatement.setString(i + 1, parameters.get(i));
+					}
+					try (ResultSet resultSet = preparedStatement.executeQuery()) {
+						return resultSet.next() ? resultSet.getInt(1) > 0 : null;
+					}
+				}
+			});
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Default value and auto increment information of a column from the JDBC metadata.
+	 */
+	private static class ColumnInsertInfo {
+		private boolean hasDefaultValue;
+		private boolean isAutoIncrement;
+		private boolean isGenerated;
+	}
+
+	/**
+	 * Reads the default value and auto increment information of the columns of a table from the JDBC metadata.
+	 *
+	 * @return the information by lowercased column name, or null if the table is not found or ambiguous (the same table name in several schemas)
+	 */
+	private static Map<String, ColumnInsertInfo> readColumnInsertInfos(final Connection connection, final DbVendor dbVendor, final String tableName) {
+		try {
+			return callWithSavepoint(connection, () -> {
+				final DatabaseMetaData metaData = connection.getMetaData();
+
+				String schemaName = tableName.contains(".") ? unquoteName(dbVendor, tableName.substring(0, tableName.lastIndexOf("."))) : null;
+				final String plainTableName = unquoteName(dbVendor, tableName.contains(".") ? tableName.substring(tableName.lastIndexOf(".") + 1) : tableName);
+
+				String catalogName = null;
+				if (dbVendor == DbVendor.MySQL || dbVendor == DbVendor.MariaDB) {
+					// MySQL and MariaDB use the catalog as database (schema)
+					catalogName = schemaName != null ? schemaName : connection.getCatalog();
+					schemaName = null;
+				} else if (schemaName == null && dbVendor != DbVendor.SQLite) {
+					try {
+						schemaName = connection.getSchema();
+					} catch (@SuppressWarnings("unused") final Throwable t) {
+						// Old drivers do not support getSchema()
+						schemaName = null;
+					}
+					if (schemaName == null && dbVendor == DbVendor.Oracle) {
+						schemaName = metaData.getUserName();
+					}
+				}
+
+				final List<String> schemaVariants = new ArrayList<>();
+				if (schemaName == null) {
+					schemaVariants.add(null);
+				} else {
+					addVariant(schemaVariants, schemaName);
+					addVariant(schemaVariants, schemaName.toUpperCase());
+					addVariant(schemaVariants, schemaName.toLowerCase());
+				}
+				final List<String> tableVariants = new ArrayList<>();
+				addVariant(tableVariants, plainTableName);
+				addVariant(tableVariants, plainTableName.toUpperCase());
+				addVariant(tableVariants, plainTableName.toLowerCase());
+
+				for (final String schemaVariant : schemaVariants) {
+					for (final String tableVariant : tableVariants) {
+						final Map<String, ColumnInsertInfo> columnInsertInfos = new HashMap<>();
+						final Set<String> foundTables = new java.util.HashSet<>();
+						try (ResultSet resultSet = metaData.getColumns(catalogName, schemaVariant, tableVariant, "%")) {
+							while (resultSet.next()) {
+								final String foundTableName = resultSet.getString("TABLE_NAME");
+								if (foundTableName == null || !foundTableName.equalsIgnoreCase(plainTableName)) {
+									// "_" in the table name is a wildcard of the metadata pattern
+									continue;
+								}
+								foundTables.add(resultSet.getString("TABLE_CAT") + "." + resultSet.getString("TABLE_SCHEM"));
+
+								final ColumnInsertInfo columnInsertInfo = new ColumnInsertInfo();
+								final String defaultValue = resultSet.getString("COLUMN_DEF");
+								columnInsertInfo.hasDefaultValue = defaultValue != null && !defaultValue.isBlank() && !"null".equalsIgnoreCase(defaultValue.trim());
+								columnInsertInfo.isAutoIncrement = "YES".equalsIgnoreCase(getOptionalString(resultSet, "IS_AUTOINCREMENT"));
+								columnInsertInfo.isGenerated = "YES".equalsIgnoreCase(getOptionalString(resultSet, "IS_GENERATEDCOLUMN"));
+								columnInsertInfos.put(resultSet.getString("COLUMN_NAME").toLowerCase(), columnInsertInfo);
+							}
+						}
+
+						if (foundTables.size() > 1) {
+							// Same table name in several schemas: the information is not reliable
+							return null;
+						} else if (!columnInsertInfos.isEmpty()) {
+							return columnInsertInfos;
+						}
+					}
+				}
+				return null;
+			});
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			return null;
+		}
+	}
+
+	private static void addVariant(final List<String> variants, final String variant) {
+		if (!variants.contains(variant)) {
+			variants.add(variant);
+		}
+	}
+
+	/**
+	 * Reads an optional column of a metadata result (not supported by all JDBC drivers).
+	 */
+	private static String getOptionalString(final ResultSet resultSet, final String columnLabel) {
+		try {
+			return resultSet.getString(columnLabel);
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Removes the vendor specific quotes of a name (", `, []).
+	 */
+	private static String unquoteName(final DbVendor dbVendor, final String name) {
+		if (name == null) {
+			return null;
+		}
+		String unquotedName = unescapeVendorReservedNames(dbVendor, name.trim());
+		if (unquotedName.length() >= 2
+				&& ((unquotedName.startsWith("\"") && unquotedName.endsWith("\""))
+						|| (unquotedName.startsWith("`") && unquotedName.endsWith("`"))
+						|| (unquotedName.startsWith("[") && unquotedName.endsWith("]")))) {
+			unquotedName = unquotedName.substring(1, unquotedName.length() - 1);
+		}
+		return unquotedName;
+	}
+
+	/**
+	 * Action on a database connection, which may throw any exception.
+	 */
+	@FunctionalInterface
+	private interface ConnectionAction<T> {
+		T execute() throws Exception;
+	}
+
+	/**
+	 * Executes an action within a savepoint, if the connection is not in auto commit mode. A failed statement is
+	 * rolled back to the savepoint, so the transaction stays usable (e.g. PostgreSQL aborts the whole transaction
+	 * after any error).
+	 */
+	private static <T> T callWithSavepoint(final Connection connection, final ConnectionAction<T> action) throws Exception {
+		java.sql.Savepoint savepoint = null;
+		try {
+			if (!connection.getAutoCommit()) {
+				savepoint = connection.setSavepoint();
+			}
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			savepoint = null;
+		}
+
+		try {
+			final T result = action.execute();
+			if (savepoint != null) {
+				try {
+					connection.releaseSavepoint(savepoint);
+				} catch (@SuppressWarnings("unused") final Exception e) {
+					// Not supported by all vendors (e.g. Oracle)
+				}
+			}
+			return result;
+		} catch (final Exception e) {
+			if (savepoint != null) {
+				try {
+					connection.rollback(savepoint);
+				} catch (@SuppressWarnings("unused") final Exception e1) {
+					// Nothing more to do
+				}
+			}
+			throw e;
 		}
 	}
 

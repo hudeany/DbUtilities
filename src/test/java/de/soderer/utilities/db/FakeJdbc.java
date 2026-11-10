@@ -126,7 +126,7 @@ public final class FakeJdbc {
 		/**
 		 * Answers all statements matching the regular expression (case insensitive, first match wins). Several results
 		 * are returned one after the other for repeated executions, the last one is repeated.
-		 * Metadata calls are matched as "META getPrimaryKeys schema.table" and "META getImportedKeys schema.table".
+		 * Metadata calls are matched as "META getPrimaryKeys schema.table", "META getImportedKeys schema.table" and "META getColumns schema.table".
 		 */
 		public FakeDatabase on(final String regex, final Result... results) {
 			rules.add(new Rule(regex, results));
@@ -306,6 +306,7 @@ public final class FakeJdbc {
 					return Integer.valueOf(database.databaseMajorVersion);
 				case "getPrimaryKeys":
 				case "getImportedKeys":
+				case "getColumns":
 					final String sql = "META " + method.getName() + " " + (args[1] == null ? "" : args[1] + ".") + args[2];
 					return createResultSet(database.answer(sql, new ArrayList<>()));
 				default:
