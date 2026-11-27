@@ -128,8 +128,9 @@ class SqlDdlMergeGeneratorTest {
 		void schemaInBoth() throws Exception {
 			final String ddl = "CREATE SCHEMA shared;";
 			final String output = merge(ddl, ddl);
-			// Count occurrences — should appear exactly once
-			final int count = countOccurrences(output.toLowerCase(), "create schema shared");
+			// Count occurrences — should appear exactly once (written with "IF NOT EXISTS", so the merged DDL can be
+			// imported into a database which already contains the schema)
+			final int count = countOccurrences(output.toLowerCase(), "create schema if not exists shared");
 			assertTrue(count == 1, "Schema should appear exactly once, found: " + count);
 		}
 

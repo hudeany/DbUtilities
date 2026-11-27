@@ -4328,7 +4328,14 @@ public class DbUtilities {
 
 			try (FileInputStream inputStream = new FileInputStream(new File(filePath))) {
 				try (PreparedStatement preparedStatement = connection.prepareStatement(sqlUpdateStatementWithPlaceholder)) {
-					preparedStatement.setBinaryStream(1, inputStream);
+					// With the length: the SQLite JDBC driver does not support setBinaryStream() without length
+					// (SQLFeatureNotSupportedException) and only supports the int variant
+					final long fileLength = new File(filePath).length();
+					if (fileLength <= Integer.MAX_VALUE) {
+						preparedStatement.setBinaryStream(1, inputStream, (int) fileLength);
+					} else {
+						preparedStatement.setBinaryStream(1, inputStream, fileLength);
+					}
 					final int updatedRows = preparedStatement.executeUpdate();
 					if (!connection.getAutoCommit()) {
 						connection.commit();
