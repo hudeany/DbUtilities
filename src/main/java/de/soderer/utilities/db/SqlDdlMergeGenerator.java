@@ -27,14 +27,15 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * <p>The merger performs a structural union of both {@link DbStructure}s:
  * <ul>
  *   <li>Schemas present in only one structure are taken over as-is.</li>
- *   <li>Schemas present in both structures are merged table by table.</li>
+ *   <li>Schemas present in both structures are merged table by table. The owner from {@code structureB} wins,
+ *       if both structures define one, otherwise the non-null owner is used.</li>
  *   <li>Tables present in only one structure are taken over as-is.</li>
  *   <li>Tables present in both structures are merged column by column:
  *     <ul>
  *       <li>Columns from structure A that are missing in structure B are added.</li>
  *       <li>If the same column exists in both structures, the definition from
  *           {@code structureB} (the "dominant" structure) wins.</li>
- *       <li>Primary keys, unique keys, foreign keys, and comments from
+ *       <li>Primary keys, unique keys, foreign keys, comments and owners from
  *           {@code structureB} win when both structures define them; otherwise the
  *           non-null value is used.</li>
  *     </ul>
@@ -85,6 +86,11 @@ public class SqlDdlMergeGenerator {
 		int commentsFromA       = 0;
 		int commentsFromB       = 0;
 		int commentsBOverrideA  = 0; // both defined, B wins
+
+		// Owners (table / schema)
+		int ownersFromA         = 0;
+		int ownersFromB         = 0;
+		int ownersBOverrideA    = 0; // both defined and different, B wins
 
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
@@ -184,6 +190,19 @@ public class SqlDdlMergeGenerator {
 					writer.println("--          B overrides A           : " + commentsBOverrideA);
 				}
 			}
+			if (ownersFromA > 0 || ownersFromB > 0 || ownersBOverrideA > 0) {
+				writer.println("--");
+				writer.println("-- Owners");
+				if (ownersFromA > 0) {
+					writer.println("--          from A                  : " + ownersFromA);
+				}
+				if (ownersFromB > 0) {
+					writer.println("--          from B                  : " + ownersFromB);
+				}
+				if (ownersBOverrideA > 0) {
+					writer.println("--          B overrides A           : " + ownersBOverrideA);
+				}
+			}
 			writer.println("-- ============================================================");
 			writer.println();
 		}
@@ -243,6 +262,9 @@ public class SqlDdlMergeGenerator {
 
 				if (!schemaName.isEmpty()) {
 					writer.println("CREATE SCHEMA " + quote(schemaName) + ";");
+					if (schema.getOwner() != null) {
+						writer.println("ALTER SCHEMA " + quote(schemaName) + " OWNER TO " + quote(schema.getOwner()) + ";");
+					}
 					if (schema.getSchemaComment() != null) {
 						writer.println("COMMENT ON SCHEMA " + quote(schemaName) + " IS " + sqlString(schema.getSchemaComment()) + ";");
 					}
@@ -296,6 +318,7 @@ public class SqlDdlMergeGenerator {
 
 		final DbSchema result = new DbSchema();
 		result.setSchemaName(base.getSchemaName());
+		result.setOwner(mergeOwner(schemaA == null ? null : schemaA.getOwner(), schemaB == null ? null : schemaB.getOwner(), stats));
 
 		if (other != null && other.getSchemaComment() != null) {
 			result.setSchemaComment(other.getSchemaComment());
@@ -353,6 +376,7 @@ public class SqlDdlMergeGenerator {
 
 		final DbTable result = new DbTable();
 		result.setTableName(base.getTableName());
+		result.setOwner(mergeOwner(tableA == null ? null : tableA.getOwner(), tableB == null ? null : tableB.getOwner(), stats));
 
 		if (other == null) {
 			for (final Map.Entry<String, DbColumn> e : base.getColumns().entrySet()) {
@@ -489,6 +513,29 @@ public class SqlDdlMergeGenerator {
 		return result;
 	}
 
+	/**
+	 * Owner of a merged schema or table: the owner of B wins, if both define one, otherwise the non-null owner.
+	 *
+	 * @param ownerA owner in structure A, may be null
+	 * @param ownerB owner in structure B, may be null
+	 * @param stats statistics to count the owner source
+	 * @return the merged owner, or null if neither structure defines one
+	 */
+	private static String mergeOwner(final String ownerA, final String ownerB, final MergeStatistics stats) {
+		if (ownerB != null) {
+			stats.ownersFromB++;
+			if (ownerA != null && !ownerA.equals(ownerB)) {
+				stats.ownersBOverrideA++;
+			}
+			return ownerB;
+		} else if (ownerA != null) {
+			stats.ownersFromA++;
+			return ownerA;
+		} else {
+			return null;
+		}
+	}
+
 	private static void writeCreateTable(final PrintWriter writer, final String schemaName, final DbTable table,
 			final boolean sortByColumn) {
 		final String qualifiedTable = qualifiedName(schemaName, table.getTableName());
@@ -531,6 +578,10 @@ public class SqlDdlMergeGenerator {
 		}
 
 		writer.println(");");
+
+		if (table.getOwner() != null) {
+			writer.println("ALTER TABLE " + qualifiedTable + " OWNER TO " + quote(table.getOwner()) + ";");
+		}
 
 		if (table.getTableComment() != null) {
 			writer.println("COMMENT ON TABLE " + qualifiedTable

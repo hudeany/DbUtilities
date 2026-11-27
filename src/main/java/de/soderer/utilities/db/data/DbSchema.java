@@ -19,6 +19,8 @@ public class DbSchema {
 	private String schemaName;
 	private final LinkedHashMap<String, DbTable> tables = new CaseInsensitiveLinkedMap<>();
 	private String schemaComment;
+	/** Owner (e.g. PostgreSQL role), null if the DDL defines none */
+	private String owner;
 
 	/**
 	 * Returns the schema name.
@@ -84,6 +86,35 @@ public class DbSchema {
 	 */
 	public DbSchema withSchemaComment(final String newSchemaComment) {
 		setSchemaComment(newSchemaComment);
+		return this;
+	}
+
+	/**
+	 * Returns the owner (e.g. the PostgreSQL role from "OWNER TO").
+	 *
+	 * @return the owner, or null if the DDL defines none
+	 */
+	public String getOwner() {
+		return owner;
+	}
+
+	/**
+	 * Sets the owner.
+	 *
+	 * @param owner the owner, or null if unknown
+	 */
+	public void setOwner(final String owner) {
+		this.owner = owner;
+	}
+
+	/**
+	 * Sets the owner and returns this instance for method chaining.
+	 *
+	 * @param newOwner the owner, or null if unknown
+	 * @return this instance
+	 */
+	public DbSchema withOwner(final String newOwner) {
+		setOwner(newOwner);
 		return this;
 	}
 

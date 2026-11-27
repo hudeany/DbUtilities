@@ -25,6 +25,8 @@ public class DbTable {
 	private final List<DbForeignKey> foreignKeys = new ArrayList<>();
 	private final Map<String, List<String>> uniqueKeys = new LinkedHashMap<>();
 	private String tableComment;
+	/** Owner (e.g. PostgreSQL role), null if the DDL defines none */
+	private String owner;
 
 	/**
 	 * Returns the table name.
@@ -165,6 +167,35 @@ public class DbTable {
 	 */
 	public DbTable withTableComment(final String newTableComment) {
 		setTableComment(newTableComment);
+		return this;
+	}
+
+	/**
+	 * Returns the owner (e.g. the PostgreSQL role from "OWNER TO").
+	 *
+	 * @return the owner, or null if the DDL defines none
+	 */
+	public String getOwner() {
+		return owner;
+	}
+
+	/**
+	 * Sets the owner.
+	 *
+	 * @param owner the owner, or null if unknown
+	 */
+	public void setOwner(final String owner) {
+		this.owner = owner;
+	}
+
+	/**
+	 * Sets the owner and returns this instance for method chaining.
+	 *
+	 * @param newOwner the owner, or null if unknown
+	 * @return this instance
+	 */
+	public DbTable withOwner(final String newOwner) {
+		setOwner(newOwner);
 		return this;
 	}
 

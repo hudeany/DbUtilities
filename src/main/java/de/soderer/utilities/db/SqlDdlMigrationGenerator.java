@@ -44,6 +44,9 @@ import de.soderer.utilities.db.exception.DbStructureException;
  *   <li>New foreign keys => {@code ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY}</li>
  *   <li>Dropped foreign keys => {@code ALTER TABLE … DROP CONSTRAINT}</li>
  *   <li>Changed comments => {@code COMMENT ON …}</li>
+ *   <li>Owners of new schemas and tables, changed owners => {@code ALTER SCHEMA/TABLE … OWNER TO}. An owner is only
+ *       changed, if both structures define one (a DDL file without owners, e.g. by "pg_dump --no-owner", changes
+ *       no owner).</li>
  * </ul>
  */
 public class SqlDdlMigrationGenerator {
@@ -71,6 +74,7 @@ public class SqlDdlMigrationGenerator {
 		int foreignKeysAdded        = 0;
 		int foreignKeysDropped      = 0;
 		int commentsChanged         = 0; // table / schema comments
+		int ownersChanged           = 0; // table / schema owners
 
 		void writeTo(final PrintWriter writer) {
 			writer.println("-- ============================================================");
@@ -151,6 +155,11 @@ public class SqlDdlMigrationGenerator {
 				if (commentsChanged > 0) {
 					writer.println("--          changed  : " + commentsChanged);
 				}
+			}
+			if (ownersChanged > 0) {
+				writer.println("--");
+				writer.println("-- Owners");
+				writer.println("--          changed  : " + ownersChanged);
 			}
 			writer.println("-- ============================================================");
 			writer.println();
@@ -263,6 +272,9 @@ public class SqlDdlMigrationGenerator {
 			} else if (!inSrc && inDst) {
 				final DbSchema dstSchema = dstSchemas.get(schemaName);
 				statements.add("CREATE SCHEMA " + quote(schemaName) + ";");
+				if (dstSchema.getOwner() != null) {
+					statements.add("ALTER SCHEMA " + quote(schemaName) + " OWNER TO " + quote(dstSchema.getOwner()) + ";");
+				}
 				stats.schemasCreated++;
 				final List<String> tableNames = new ArrayList<>(dstSchema.getTables().keySet());
 				if (sortByTable) {
@@ -316,6 +328,11 @@ public class SqlDdlMigrationGenerator {
 			} else {
 				statements.addAll(diffTable(schemaName, srcTables.get(tableName), dstTables.get(tableName), stats, sortByColumn));
 			}
+		}
+
+		if (isOwnerChanged(source.getOwner(), destination.getOwner())) {
+			statements.add("ALTER SCHEMA " + quote(schemaName) + " OWNER TO " + quote(destination.getOwner()) + ";");
+			stats.ownersChanged++;
 		}
 
 		// A removed comment is reset by "IS NULL"
@@ -376,6 +393,11 @@ public class SqlDdlMigrationGenerator {
 		statements.addAll(diffUniqueKeys(qualifiedTable, source.getUniqueKeys(), destination.getUniqueKeys(), stats));
 
 		statements.addAll(diffForeignKeys(qualifiedTable, source.getForeignKeys(), destination.getForeignKeys(), stats));
+
+		if (isOwnerChanged(source.getOwner(), destination.getOwner())) {
+			statements.add("ALTER TABLE " + qualifiedTable + " OWNER TO " + quote(destination.getOwner()) + ";");
+			stats.ownersChanged++;
+		}
 
 		// A removed comment is reset by "IS NULL"
 		if (!Objects.equals(source.getTableComment(), destination.getTableComment())) {
@@ -573,6 +595,10 @@ public class SqlDdlMigrationGenerator {
 
 		statements.add(sb.toString());
 
+		if (table.getOwner() != null) {
+			statements.add("ALTER TABLE " + qualifiedTable + " OWNER TO " + quote(table.getOwner()) + ";");
+		}
+
 		if (table.getTableComment() != null) {
 			statements.add("COMMENT ON TABLE " + qualifiedTable
 					+ " IS " + sqlString(table.getTableComment()) + ";");
@@ -586,6 +612,18 @@ public class SqlDdlMigrationGenerator {
 		}
 
 		return statements;
+	}
+
+	/**
+	 * An owner is only changed, if both structures define an owner and they differ. A missing owner (e.g. a DDL file
+	 * created by "pg_dump --no-owner") means "unknown" and causes no change.
+	 *
+	 * @param sourceOwner owner in the source structure, may be null
+	 * @param destinationOwner owner in the destination structure, may be null
+	 * @return true if an "OWNER TO" statement is needed
+	 */
+	private static boolean isOwnerChanged(final String sourceOwner, final String destinationOwner) {
+		return sourceOwner != null && destinationOwner != null && !sourceOwner.equals(destinationOwner);
 	}
 
 	private static String dropTable(final String schemaName, final String tableName) {
