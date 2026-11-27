@@ -261,7 +261,9 @@ public class SqlDdlMergeGenerator {
 				final DbSchema schema = merged.getSchemas().get(schemaName);
 
 				if (!schemaName.isEmpty()) {
-					writer.println("CREATE SCHEMA " + quote(schemaName) + ";");
+					// "IF NOT EXISTS": the merged DDL may be imported into a database, which already has the schema
+					// (e.g. "public" exists in every PostgreSQL database)
+					writer.println("CREATE SCHEMA IF NOT EXISTS " + quote(schemaName) + ";");
 					if (schema.getOwner() != null) {
 						writer.println("ALTER SCHEMA " + quote(schemaName) + " OWNER TO " + quote(schema.getOwner()) + ";");
 					}
@@ -383,6 +385,7 @@ public class SqlDdlMergeGenerator {
 				result.createColumn(e.getKey(), e.getValue());
 			}
 			result.setPrimaryKey(base.getPrimaryKey());
+			result.setPrimaryKeyName(base.getPrimaryKeyName());
 			if (base.getPrimaryKey() != null && !base.getPrimaryKey().isEmpty()) {
 				if (tableA != null) {
 					stats.pkFromA++;
@@ -447,12 +450,14 @@ public class SqlDdlMergeGenerator {
 		final boolean otherHasPk = other.getPrimaryKey() != null && !other.getPrimaryKey().isEmpty();
 		if (otherHasPk) {
 			result.setPrimaryKey(other.getPrimaryKey());
+			result.setPrimaryKeyName(other.getPrimaryKeyName());
 			stats.pkFromB++;
 			if (baseHasPk) {
 				stats.pkBOverridesA++;
 			}
 		} else if (baseHasPk) {
 			result.setPrimaryKey(base.getPrimaryKey());
+			result.setPrimaryKeyName(base.getPrimaryKeyName());
 			stats.pkFromA++;
 		}
 
@@ -555,7 +560,7 @@ public class SqlDdlMergeGenerator {
 
 		final List<String> pk = table.getPrimaryKey();
 		if (pk != null && !pk.isEmpty()) {
-			entries.add("    CONSTRAINT " + quote("pk_" + table.getTableName())
+			entries.add("    CONSTRAINT " + quote(table.getPrimaryKeyName() != null ? table.getPrimaryKeyName() : "pk_" + table.getTableName())
 					+ " PRIMARY KEY (" + quoteList(pk) + ")");
 		}
 

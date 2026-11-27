@@ -22,6 +22,8 @@ public class DbTable {
 	private String tableName;
 	private final Map<String, DbColumn> columns = new CaseInsensitiveLinkedMap<>();
 	private List<String> primaryKey;
+	/** Constraint name of the primary key, null if the DDL defines none */
+	private String primaryKeyName;
 	private final List<DbForeignKey> foreignKeys = new ArrayList<>();
 	private final Map<String, List<String>> uniqueKeys = new LinkedHashMap<>();
 	private String tableComment;
@@ -92,6 +94,35 @@ public class DbTable {
 	 */
 	public DbTable withPrimaryKey(final List<String> newPrimaryKey) {
 		setPrimaryKey(newPrimaryKey);
+		return this;
+	}
+
+	/**
+	 * Returns the constraint name of the primary key.
+	 *
+	 * @return the constraint name, or null if the DDL defines none (e.g. inline "PRIMARY KEY" at a column)
+	 */
+	public String getPrimaryKeyName() {
+		return primaryKeyName;
+	}
+
+	/**
+	 * Sets the constraint name of the primary key.
+	 *
+	 * @param primaryKeyName the constraint name, or null if unknown
+	 */
+	public void setPrimaryKeyName(final String primaryKeyName) {
+		this.primaryKeyName = primaryKeyName;
+	}
+
+	/**
+	 * Sets the constraint name of the primary key and returns this instance for method chaining.
+	 *
+	 * @param newPrimaryKeyName the constraint name, or null if unknown
+	 * @return this instance
+	 */
+	public DbTable withPrimaryKeyName(final String newPrimaryKeyName) {
+		setPrimaryKeyName(newPrimaryKeyName);
 		return this;
 	}
 

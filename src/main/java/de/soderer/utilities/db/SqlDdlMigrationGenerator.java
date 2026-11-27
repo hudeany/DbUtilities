@@ -471,13 +471,14 @@ public class SqlDdlMigrationGenerator {
 		}
 
 		if (srcPk != null && !srcPk.isEmpty()) {
-			final String pkConstraintName = "pk_" + unqualifiedName(qualifiedTable);
+			// The real constraint name, e.g. "<table>_pkey" of PostgreSQL, if the DDL defines it
+			final String pkConstraintName = getPrimaryKeyName(source, unqualifiedName(qualifiedTable));
 			statements.add("ALTER TABLE " + qualifiedTable
 					+ " DROP CONSTRAINT IF EXISTS " + quote(pkConstraintName) + ";");
 		}
 
 		if (dstPk != null && !dstPk.isEmpty()) {
-			final String pkConstraintName = "pk_" + unqualifiedName(qualifiedTable);
+			final String pkConstraintName = getPrimaryKeyName(destination, unqualifiedName(qualifiedTable));
 			statements.add("ALTER TABLE " + qualifiedTable
 					+ " ADD CONSTRAINT " + quote(pkConstraintName)
 					+ " PRIMARY KEY (" + quoteList(dstPk) + ");");
@@ -572,7 +573,7 @@ public class SqlDdlMigrationGenerator {
 
 		final List<String> pk = table.getPrimaryKey();
 		if (pk != null && !pk.isEmpty()) {
-			final String pkConstraintName = "pk_" + table.getTableName();
+			final String pkConstraintName = getPrimaryKeyName(table, table.getTableName());
 			entries.add("\n    CONSTRAINT " + quote(pkConstraintName)
 					+ " PRIMARY KEY (" + quoteList(pk) + ")");
 		}
@@ -624,6 +625,13 @@ public class SqlDdlMigrationGenerator {
 	 */
 	private static boolean isOwnerChanged(final String sourceOwner, final String destinationOwner) {
 		return sourceOwner != null && destinationOwner != null && !sourceOwner.equals(destinationOwner);
+	}
+
+	/**
+	 * Returns the constraint name of the primary key, or "pk_&lt;table&gt;", if the DDL defines no name.
+	 */
+	private static String getPrimaryKeyName(final DbTable table, final String tableName) {
+		return table.getPrimaryKeyName() != null ? table.getPrimaryKeyName() : "pk_" + tableName;
 	}
 
 	private static String dropTable(final String schemaName, final String tableName) {

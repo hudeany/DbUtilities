@@ -29,7 +29,8 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * <p>
  * Supported statements:
  * <ul>
- * <li>{@code CREATE SCHEMA <name>}</li>
+ * <li>{@code CREATE SCHEMA <name> [AUTHORIZATION <owner>]}</li>
+ * <li>{@code ALTER SCHEMA <name> OWNER TO <owner>} (PostgreSQL)</li>
  * <li>{@code CREATE TABLE [<schema>.]
  * <table>
  *  ( <column_defs>, [constraints] )}</li>
@@ -48,6 +49,9 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * </ul>
  *
  * <p>
+ * {@code ALTER TABLE [IF EXISTS] [ONLY] <table>} is supported, as written by pg_dump.
+ *
+ * <p>
  * Supported {@code ALTER TABLE} clauses (multiple comma-separated clauses per
  * statement allowed):
  * <ul>
@@ -61,7 +65,9 @@ import de.soderer.utilities.db.exception.DbStructureException;
  * (PostgreSQL)</li>
  * <li>{@code CHANGE [COLUMN] <old> <new_col_def>} (MySQL rename + retype)</li>
  * <li>{@code RENAME COLUMN <old> TO <new>}</li>
- * <li>{@code ADD [CONSTRAINT <name>] PRIMARY KEY (<cols>)}</li>
+ * <li>{@code ADD [CONSTRAINT <name>] PRIMARY KEY (<cols>)} (the constraint name is kept)</li>
+ * <li>{@code OWNER TO <owner>} (PostgreSQL)</li>
+ * <li>{@code ALTER [COLUMN] <col> ADD GENERATED … AS IDENTITY (…)} (PostgreSQL, as written by pg_dump)</li>
  * <li>{@code ADD [CONSTRAINT <name>] UNIQUE (<cols>)}</li>
  * <li>{@code ADD [CONSTRAINT <name>] FOREIGN KEY (<cols>) REFERENCES …}</li>
  * <li>{@code DROP CONSTRAINT <name>}</li>
@@ -97,7 +103,8 @@ import de.soderer.utilities.db.exception.DbStructureException;
  *
  * <p>
  * SQL syntax comments ({@code -- …} and {@code /* … *}{@code /}) are stripped
- * before parsing.
+ * before parsing. PostgreSQL dollar quoted strings (e.g. function bodies) are kept
+ * as a whole, so their semicolons do not split statements.
  */
 public class SqlDdlParser {
 	/**
@@ -137,7 +144,9 @@ public class SqlDdlParser {
 	public static DbStructure parse(final InputStream inputStream) throws IOException, DbStructureException {
 
 		final String sql = readAll(inputStream);
-		final String stripped = stripComments(sql);
+		// psql meta commands (e.g. "\\restrict …" of newer pg_dump versions) are no SQL and end without semicolon,
+		// so they would be prepended to the next statement
+		final String stripped = stripComments(sql).replaceAll("(?m)^\\s*\\\\[a-zA-Z].*$", "");
 		final List<String> statements = splitStatements(stripped);
 
 		final DbStructure structure = new DbStructure();
@@ -150,6 +159,8 @@ public class SqlDdlParser {
 			final String upper = trimmed.toUpperCase();
 			if (upper.startsWith("CREATE SCHEMA")) {
 				parseCreateSchema(trimmed, structure);
+			} else if (upper.startsWith("ALTER SCHEMA")) {
+				parseAlterSchema(trimmed, structure);
 			} else if (upper.startsWith("CREATE TABLE")) {
 				parseCreateTable(trimmed, structure);
 			} else if (upper.startsWith("ALTER TABLE")) {
@@ -168,15 +179,39 @@ public class SqlDdlParser {
 
 	private static void parseCreateSchema(final String stmt, final DbStructure structure) throws DbStructureException {
 
-		// CREATE SCHEMA [IF NOT EXISTS] <name>
-		final Pattern p = Pattern.compile("(?i)CREATE\\s+SCHEMA\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([\\w\"`.]+)");
+		// CREATE SCHEMA [IF NOT EXISTS] <name> [AUTHORIZATION <owner>]
+		// CREATE SCHEMA [IF NOT EXISTS] AUTHORIZATION <owner> (schema named like the owner)
+		final Pattern p = Pattern.compile("(?i)CREATE\\s+SCHEMA\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([\\w\"`.]+)(?:\\s+AUTHORIZATION\\s+([\\w\"`.]+))?");
 		final Matcher m = p.matcher(stmt);
 		if (!m.find()) {
 			return;
 		}
-		final String schemaName = unquote(m.group(1));
-		final DbSchema schema = new DbSchema().withSchemaName(schemaName);
+		String schemaName = unquote(m.group(1));
+		String owner = m.group(2) != null ? unquote(m.group(2)) : null;
+		if ("AUTHORIZATION".equalsIgnoreCase(m.group(1))) {
+			final Matcher authorizationOnlyMatcher = Pattern.compile("(?i)AUTHORIZATION\\s+([\\w\"`.]+)").matcher(stmt);
+			if (!authorizationOnlyMatcher.find()) {
+				return;
+			}
+			owner = unquote(authorizationOnlyMatcher.group(1));
+			schemaName = owner;
+		}
+		final DbSchema schema = new DbSchema().withSchemaName(schemaName).withOwner(owner);
 		structure.createSchema(schemaName, schema);
+	}
+
+	/**
+	 * Handles {@code ALTER SCHEMA <name> OWNER TO <owner>}. Other ALTER SCHEMA statements (e.g. RENAME TO) and
+	 * schemas not created in this DDL stream are ignored.
+	 */
+	private static void parseAlterSchema(final String stmt, final DbStructure structure) {
+		final Matcher m = Pattern.compile("(?i)^ALTER\\s+SCHEMA\\s+([\\w\"`.]+)\\s+OWNER\\s+TO\\s+([\\w\"`.]+)").matcher(stmt.trim());
+		if (m.find()) {
+			final DbSchema schema = structure.getSchemas().get(unquote(m.group(1)));
+			if (schema != null) {
+				schema.setOwner(unquote(m.group(2)));
+			}
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -230,6 +265,7 @@ public class SqlDdlParser {
 		final DbTable table = new DbTable().withTableName(tableName);
 		final LinkedHashMap<String, DbColumn> columns = new LinkedHashMap<>();
 		final List<String> pkCols = new ArrayList<>();
+		String pkName = null;
 		final LinkedHashMap<String, List<String>> uniqueKeys = new LinkedHashMap<>();
 		final List<DbForeignKey> fkList = new ArrayList<>();
 
@@ -252,6 +288,7 @@ public class SqlDdlParser {
 				// CONSTRAINT name PRIMARY KEY / UNIQUE / FOREIGN KEY
 				if (eUpper.contains("PRIMARY KEY")) {
 					pkCols.addAll(extractColumnList(e));
+					pkName = extractConstraintName(e);
 				} else if (eUpper.contains("UNIQUE")) {
 					// Extract the constraint name to pass it explicitly
 					final Pattern cnPat = Pattern.compile("(?i)CONSTRAINT\\s+([\\w\"`.]+)");
@@ -288,6 +325,7 @@ public class SqlDdlParser {
 			table.createColumn(columnEntry.getKey(), columnEntry.getValue());
 		}
 		table.setPrimaryKey(pkCols.isEmpty() ? null : pkCols);
+		table.setPrimaryKeyName(pkCols.isEmpty() ? null : pkName);
 		for (final Entry<String, List<String>> uq : uniqueKeys.entrySet()) {
 			table.addUniqueKey(uq.getKey(), uq.getValue());
 		}
@@ -338,8 +376,9 @@ public class SqlDdlParser {
 	 */
 	private static void parseAlterTable(final String stmt, final DbStructure structure) throws DbStructureException {
 
-		// ALTER TABLE [schema.]table <clauses>
-		final Pattern headerPat = Pattern.compile("(?i)^ALTER\\s+TABLE\\s+([\\w\"`.]+(?:\\.[\\w\"`.]+)?)\\s+(.+)$",
+		// ALTER TABLE [IF EXISTS] [ONLY] [schema.]table <clauses>
+		// (pg_dump writes "ALTER TABLE ONLY", before "ONLY" was taken as table name and the statement was ignored)
+		final Pattern headerPat = Pattern.compile("(?i)^ALTER\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?(?:ONLY\\s+)?([\\w\"`.]+(?:\\.[\\w\"`.]+)?)\\s+(.+)$",
 				Pattern.DOTALL);
 		final Matcher hm = headerPat.matcher(stmt.trim());
 		if (!hm.find()) {
@@ -397,6 +436,7 @@ public class SqlDdlParser {
 					final List<String> pkCols = extractColumnList(colBody);
 					if (!pkCols.isEmpty()) {
 						table.setPrimaryKey(pkCols);
+						table.setPrimaryKeyName(extractConstraintName(colBody));
 					}
 					return;
 				}
@@ -479,10 +519,17 @@ public class SqlDdlParser {
 
 			} else if (bodyUpper.startsWith("PRIMARY KEY")) {
 				table.setPrimaryKey(null);
+				table.setPrimaryKeyName(null);
 
 			} else if (bodyUpper.startsWith("CONSTRAINT")) {
-				// DROP CONSTRAINT name — could be PK, UK, or FK
-				final String name = unquote(body.substring(10).trim().split("\\s+")[0]);
+				// DROP CONSTRAINT [IF EXISTS] name — could be PK, UK, or FK
+				final String name = unquote(body.substring(10).trim().replaceFirst("(?i)^IF\\s+EXISTS\\s+", "").split("\\s+")[0]);
+				// Primary key with this constraint name
+				if (name.equals(table.getPrimaryKeyName())) {
+					table.setPrimaryKey(null);
+					table.setPrimaryKeyName(null);
+					return;
+				}
 				// Try unique key first
 				if (table.getUniqueKeys().containsKey(name)) {
 					table.getUniqueKeys().remove(name);
@@ -521,6 +568,15 @@ public class SqlDdlParser {
 			final String body = clause.substring(6).trim();
 			final String colBody = body.toUpperCase().startsWith("COLUMN") ? body.substring(6).trim() : body;
 			applyModifyColumn(colBody, tableName, table);
+			return;
+		}
+
+		// ---- OWNER TO (PostgreSQL) ----
+		if (upper.startsWith("OWNER")) {
+			final Matcher ownerMatcher = Pattern.compile("(?i)^OWNER\\s+TO\\s+([\\w\"`.]+)").matcher(clause);
+			if (ownerMatcher.find()) {
+				table.setOwner(unquote(ownerMatcher.group(1)));
+			}
 			return;
 		}
 
@@ -590,6 +646,25 @@ public class SqlDdlParser {
 	 * changed.
 	 */
 	private static void applyModifyColumn(final String colBody, final String tableName, final DbTable table) {
+		// PostgreSQL (pg_dump): ALTER COLUMN col ADD GENERATED {ALWAYS | BY DEFAULT} AS IDENTITY [(sequence options)]
+		// Before, this was re-parsed as column definition with the type "ADD" and replaced the column type
+		final Matcher identityMatcher = Pattern.compile("(?is)^([\\w\"`.]+)\\s+ADD\\s+GENERATED\\s+(?:ALWAYS|BY\\s+DEFAULT)\\s+AS\\s+IDENTITY\\b.*$").matcher(colBody.trim());
+		if (identityMatcher.find()) {
+			final DbColumn col = table.getColumns().get(unquote(identityMatcher.group(1)));
+			if (col != null && col.getColumnType() != null) {
+				final DbColumnType old = col.getColumnType();
+				col.setColumnType(new DbColumnType(old.getTypeName(), old.getCharacterByteSize(), old.getNumericPrecision(),
+						old.getNumericScale(), old.isNullable(), true, old.getDefaultValue()));
+			}
+			return;
+		}
+
+		// Other ADD/DROP/SET sub-forms of PostgreSQL ALTER COLUMN (e.g. DROP IDENTITY, SET STATISTICS) are no column
+		// definitions and must not be re-parsed as such
+		if (Pattern.compile("(?is)^[\\w\"`.]+\\s+(?:DROP\\s+IDENTITY|SET\\s+(?:STATISTICS|STORAGE|COMPRESSION|GENERATED|INCREMENT|START)|RESTART|RESET)\\b.*$").matcher(colBody.trim()).find()) {
+			return;
+		}
+
 		// PostgreSQL: ALTER COLUMN col SET NOT NULL / DROP NOT NULL
 		final Pattern setNullPat = Pattern.compile("(?i)^([\\w\"`.]+)\\s+(SET\\s+NOT\\s+NULL|DROP\\s+NOT\\s+NULL)$");
 		final Matcher snm = setNullPat.matcher(colBody.trim());
@@ -1020,6 +1095,15 @@ public class SqlDdlParser {
 		for (int i = 0; i < sql.length(); i++) {
 			final char c = sql.charAt(i);
 
+			// PostgreSQL dollar quoting (e.g. function bodies "AS $$ … ; … $$"), copied verbatim, because the
+			// semicolons, quotes and brackets within the body are no statement syntax
+			final int dollarQuoteEnd = inSingleQuote ? -1 : findDollarQuoteEnd(sql, i);
+			if (dollarQuoteEnd > 0) {
+				buf.append(sql, i, dollarQuoteEnd);
+				i = dollarQuoteEnd - 1;
+				continue;
+			}
+
 			if (c == '\'' && !inSingleQuote) {
 				inSingleQuote = true;
 				buf.append(c);
@@ -1110,6 +1194,14 @@ public class SqlDdlParser {
 
 		while (i < len) {
 			final char c = sql.charAt(i);
+
+			// Dollar quoted string (PostgreSQL) – copy verbatim, "--" or quotes within a function body are no comment
+			final int dollarQuoteEnd = findDollarQuoteEnd(sql, i);
+			if (dollarQuoteEnd > 0) {
+				out.append(sql, i, dollarQuoteEnd);
+				i = dollarQuoteEnd;
+				continue;
+			}
 
 			// String literal – copy verbatim
 			if (c == '\'') {
@@ -1216,6 +1308,43 @@ public class SqlDdlParser {
 			}
 		}
 		return result.toString();
+	}
+
+	/** Opening tag of a PostgreSQL dollar quoted string: "$$" or "$tag$" ("$1" is a parameter, no tag) */
+	private static final Pattern DOLLAR_QUOTE_TAG_PATTERN = Pattern.compile("\\$(?:[A-Za-z_][A-Za-z0-9_]*)?\\$");
+
+	/**
+	 * Checks for a PostgreSQL dollar quoted string ({@code $$…$$} or {@code $tag$…$tag$}) starting at a position.
+	 *
+	 * @param text text to search in
+	 * @param start position to check
+	 * @return position after the closing tag, or -1 if no dollar quoted string starts at this position (or it is
+	 *         not closed)
+	 */
+	private static int findDollarQuoteEnd(final String text, final int start) {
+		if (text.charAt(start) != '$' || (start > 0 && (Character.isLetterOrDigit(text.charAt(start - 1)) || text.charAt(start - 1) == '_'))) {
+			// "$" within an identifier (e.g. Oracle "SYS$X") starts no dollar quote
+			return -1;
+		}
+		final Matcher tagMatcher = DOLLAR_QUOTE_TAG_PATTERN.matcher(text);
+		tagMatcher.region(start, text.length());
+		if (!tagMatcher.lookingAt()) {
+			return -1;
+		}
+		final String tag = tagMatcher.group();
+		final int closingTagStart = text.indexOf(tag, tagMatcher.end());
+		return closingTagStart < 0 ? -1 : closingTagStart + tag.length();
+	}
+
+	/**
+	 * Extracts the name of a "CONSTRAINT name …" clause.
+	 *
+	 * @param text constraint clause
+	 * @return the unquoted constraint name, or null if the clause has no name
+	 */
+	private static String extractConstraintName(final String text) {
+		final Matcher m = Pattern.compile("(?i)\\bCONSTRAINT\\s+([\\w\"`.]+)").matcher(text);
+		return m.find() ? unquote(m.group(1)) : null;
 	}
 
 	/** Strips surrounding backticks, double-quotes, or square brackets. */
